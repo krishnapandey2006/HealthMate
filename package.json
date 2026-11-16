@@ -1,0 +1,20 @@
+{
+  "name": "healthmate_mb",
+  "version": "1.0.0",
+  "description": "Local public-data proxy for HealthMate (news, campaigns, geocoding and OpenStreetMap facilities).",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "proxy": "node tools/healthmate_server.js",
+    "test:proxy": "node tools/test_proxy.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "fast-xml-parser": "^4.5.3"
+  }
+}

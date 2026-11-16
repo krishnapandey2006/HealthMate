@@ -1,0 +1,29 @@
+JS (() => { const b = document.querySelecto -> "clicked"
+JS (() => { let n=0; for (const el of docum -> "removed 6"
+TYPE into First name = Asha
+TYPE into Last name = Kumar
+TYPE into Mobile number = 9876543210
+CLICK Date of birth -> Date of birth @199,519
+SHOT baseline\setup-datepicker.png
+CLICK OK -> OK @338,680
+CLICK State / Region -> State / Region @195,640
+CLICK Assam -> Assam @199,176
+SHOT baseline\setup-filled.png
+CLICK Create my profile -> Create my profile @195,698
+SHOT baseline\home-full-390.png
+SHOT baseline\home-full-390-b.png
+SHOT baseline\home-full-390-c.png
+CLICK Vaccines -> Vaccines @146,808
+SHOT baseline\vaccines-full-390.png
+SHOT baseline\vaccines-full-390-b.png
+CLICK Appointments -> Appointments @244,808
+SHOT baseline\book-full-390.png
+SHOT baseline\book-full-390-b.png
+CLICK Profile -> Profile @341,808
+SHOT baseline\profile-full-390.png
+SHOT baseline\profile-full-390-b.png
+CLICK Home -> Home @49,808
+CLICK Settings -> Settings @322,28
+SHOT baseline\settings-full-390.png
+SHOT baseline\settings-full-390-b.png
+SHOT baseline\settings-full-390-c.png
