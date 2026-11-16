@@ -1,11 +1,11 @@
 {
-    "name": "healthmate_mb",
-    "short_name": "healthmate_mb",
+    "name": "HealthMate",
+    "short_name": "HealthMate",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F5FAF7",
+    "theme_color": "#0E8C7F",
+    "description": "Private, local-first health companion with an on-device profile, visit planner, nearby care map and recent public-health news.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

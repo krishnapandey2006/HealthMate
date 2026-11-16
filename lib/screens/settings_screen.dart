@@ -4,10 +4,14 @@ import 'package:provider/provider.dart';
 import '../app/theme.dart';
 import '../language_provider.dart';
 import '../l10n/app_localizations.dart';
+import '../services/app_lock_provider.dart';
 import '../services/app_settings_provider.dart';
 import '../services/profile_provider.dart';
 import '../services/sos_service.dart';
 import '../widgets/app_widgets.dart';
+import 'app_lock_settings_screen.dart';
+import 'help_about_screen.dart';
+import 'privacy_settings_screen.dart';
 import 'profile_setup_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -38,13 +42,70 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _pickLanguage(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    final current = context.read<LanguageProvider>().languageCode;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppSheetHeader(
+                title: l10n.t('change_language'),
+                subtitle: l10n.t('app_language_body'),
+                icon: Icons.translate_rounded,
+              ),
+              const SizedBox(height: 10),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (final item in _languages)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(item.$2),
+                          trailing: current == item.$1
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: AppColors.teal,
+                                )
+                              : null,
+                          onTap: () =>
+                              Navigator.of(sheetContext).pop(item.$1),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                l10n.t('language_fallback_note'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontSize: 11.5,
+                      height: 1.45,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !context.mounted) return;
+    await _changeLanguage(context, selected);
+  }
+
   Future<void> _editEmergencyNumber(BuildContext context) async {
     final l10n = AppLocalizations.of(context);
     final settings = context.read<AppSettingsProvider>();
     final controller = TextEditingController(text: settings.emergencyNumber);
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(l10n.t('emergency_number')),
         content: TextField(
           controller: controller,
@@ -57,9 +118,13 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(l10n.t('cancel'))),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(l10n.t('cancel')),
+          ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
             child: Text(l10n.t('save')),
           ),
         ],
@@ -70,7 +135,9 @@ class SettingsScreen extends StatelessWidget {
     if (!context.mounted) return;
     showAppSnackBar(
       context,
-      saved ? l10n.t('emergency_number_saved') : l10n.t('emergency_number_invalid'),
+      saved
+          ? l10n.t('emergency_number_saved')
+          : l10n.t('emergency_number_invalid'),
       isError: !saved,
     );
   }
@@ -87,58 +154,8 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
-  void _showSources(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(l10n.t('data_sources'), style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              Text(l10n.t('data_sources_body'), style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 16),
-              _SourceTile(
-                title: 'WHO',
-                subtitle: l10n.t('source_who'),
-                onTap: () => openExternalUrl(context, 'https://www.who.int/'),
-              ),
-              _SourceTile(
-                title: l10n.t('source_mohfw_title'),
-                subtitle: l10n.t('source_mohfw'),
-                onTap: () => openExternalUrl(context, 'https://mohfw.gov.in/'),
-              ),
-              _SourceTile(
-                title: 'NHM',
-                subtitle: l10n.t('source_nhm'),
-                onTap: () => openExternalUrl(context, 'https://nhm.gov.in/'),
-              ),
-              _SourceTile(
-                title: 'OpenStreetMap',
-                subtitle: l10n.t('source_osm'),
-                onTap: () => openExternalUrl(context, 'https://www.openstreetmap.org/'),
-              ),
-              _SourceTile(
-                title: l10n.t('source_news_title'),
-                subtitle: l10n.t('source_news'),
-                onTap: () => openExternalUrl(context, 'https://news.google.com/'),
-              ),
-              const SizedBox(height: 10),
-              AppInfoBanner(
-                icon: Icons.info_outline_rounded,
-                text: l10n.t('sources_disclaimer'),
-                color: AppColors.slate,
-                background: const Color(0xFFF0F5F3),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void _open(BuildContext context, Widget screen) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
   }
 
   @override
@@ -147,89 +164,199 @@ class SettingsScreen extends StatelessWidget {
     final settings = context.watch<AppSettingsProvider>();
     final language = context.watch<LanguageProvider>();
     final profileProvider = context.watch<ProfileProvider>();
+    final lock = context.watch<AppLockProvider>();
     final profile = profileProvider.profile;
+    final languageName = _languages
+        .firstWhere(
+          (item) => item.$1 == language.languageCode,
+          orElse: () => ('en', 'English'),
+        )
+        .$2;
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.t('settings_title'))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         child: ResponsiveBody(
-          maxWidth: 820,
+          maxWidth: 760,
           padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: AppColors.tealSoft,
-                    child: Text(
-                      profile?.firstName.trim().isNotEmpty == true
-                          ? profile!.firstName.trim().substring(0, 1).toUpperCase()
-                          : 'H',
-                      style: const TextStyle(
-                        color: AppColors.tealDark,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  onTap: () => _open(
+                    context,
+                    const ProfileSetupScreen(isEdit: true),
                   ),
-                  title: Text(profile?.displayName ?? l10n.t('profile')),
-                  subtitle: Text(l10n.t('device_only')),
-                  trailing: TextButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const ProfileSetupScreen(isEdit: true)),
-                      );
-                    },
-                    child: Text(l10n.t('manage')),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundColor: AppColors.tealSoft,
+                          child: Text(
+                            profile?.firstName.trim().isNotEmpty == true
+                                ? profile!.firstName
+                                    .trim()
+                                    .substring(0, 1)
+                                    .toUpperCase()
+                                : 'H',
+                            style: const TextStyle(
+                              color: AppColors.tealDark,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 20,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                profile?.displayName ?? l10n.t('profile'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                l10n.t('local_storage_short'),
+                                style:
+                                    Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          Icons.edit_outlined,
+                          size: 19,
+                          color: AppColors.slate,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              _SectionLabel(label: l10n.t('language_and_region')),
+              const SizedBox(height: 20),
+              _SectionLabel(label: l10n.t('settings_account')),
+              AppListPanel(
+                children: [
+                  AppNavTile(
+                    icon: Icons.translate_rounded,
+                    title: l10n.t('app_language'),
+                    subtitle: languageName,
+                    onTap: () => _pickLanguage(context),
+                  ),
+                  AppNavTile(
+                    icon: Icons.person_outline_rounded,
+                    title: l10n.t('personal_information'),
+                    subtitle: l10n.t('profile_personal_body'),
+                    onTap: () => _open(
+                      context,
+                      const ProfileSetupScreen(isEdit: true),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _SectionLabel(label: l10n.t('settings_privacy_security')),
+              AppListPanel(
+                children: [
+                  AppNavTile(
+                    icon: lock.enabled
+                        ? Icons.lock_rounded
+                        : Icons.lock_open_rounded,
+                    title: l10n.t('settings_app_lock'),
+                    subtitle: lock.enabled
+                        ? l10n.t('settings_app_lock_on')
+                        : l10n.t('settings_app_lock_off'),
+                    onTap: () =>
+                        _open(context, const AppLockSettingsScreen()),
+                  ),
+                  AppNavTile(
+                    icon: Icons.shield_outlined,
+                    title: l10n.t('privacy_settings'),
+                    subtitle: l10n.t('privacy_body'),
+                    onTap: () =>
+                        _open(context, const PrivacySettingsScreen()),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              _SectionLabel(label: l10n.t('emergency')),
               Card(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                  child: Row(
                     children: [
-                      Text(
-                        l10n.t('app_language_body'),
-                        style: Theme.of(context).textTheme.bodySmall,
+                      const Icon(
+                        Icons.call_outlined,
+                        color: AppColors.danger,
                       ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: _languages.any((item) => item.$1 == language.languageCode)
-                            ? language.languageCode
-                            : 'en',
-                        decoration: InputDecoration(
-                          labelText: l10n.t('app_language'),
-                          prefixIcon: const Icon(Icons.translate_rounded),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.t('emergency_number'),
+                              style: const TextStyle(
+                                color: AppColors.navy,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              settings.emergencyNumber,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ),
-                        items: [
-                          for (final item in _languages)
-                            DropdownMenuItem(value: item.$1, child: Text(item.$2)),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) _changeLanguage(context, value);
-                        },
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        l10n.t('language_change_note'),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                      IconButton(
+                        tooltip: l10n.t('edit'),
+                        onPressed: () => _editEmergencyNumber(context),
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
+                      IconButton(
+                        tooltip: l10n.t('call'),
+                        onPressed: () => _callEmergency(context),
+                        icon: const Icon(
+                          Icons.phone_outlined,
+                          color: AppColors.danger,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  l10n.t('settings_emergency_body'),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontSize: 11.5, height: 1.45),
+                ),
+              ),
+              const SizedBox(height: 20),
               _SectionLabel(label: l10n.t('accessibility')),
               Card(
                 child: Column(
                   children: [
                     SwitchListTile(
-                      secondary: const Icon(Icons.text_fields_rounded, color: AppColors.teal),
+                      secondary: const Icon(
+                        Icons.text_fields_rounded,
+                        color: AppColors.teal,
+                      ),
                       title: Text(l10n.t('reading_assistance')),
                       subtitle: Text(l10n.t('reading_assistance_body')),
                       value: settings.readingAssistance,
@@ -237,18 +364,25 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     const Divider(height: 1),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.format_size_rounded, color: AppColors.teal, size: 22),
+                              const Icon(
+                                Icons.format_size_rounded,
+                                color: AppColors.teal,
+                                size: 22,
+                              ),
                               const SizedBox(width: 14),
                               Expanded(
                                 child: Text(
                                   l10n.t('text_size'),
-                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: AppColors.navy,
                                       ),
@@ -269,12 +403,16 @@ class SettingsScreen extends StatelessWidget {
                             min: 1.0,
                             max: 1.5,
                             divisions: 5,
-                            label: '${(settings.textScale * 100).round()}%',
+                            label:
+                                '${(settings.textScale * 100).round()}%',
                             onChanged: settings.setTextScale,
                           ),
                           Text(
                             l10n.t('text_size_preview'),
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
                                   fontSize: 15 * settings.textScale,
                                 ),
                           ),
@@ -283,7 +421,10 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     const Divider(height: 1),
                     SwitchListTile(
-                      secondary: const Icon(Icons.volume_up_outlined, color: AppColors.teal),
+                      secondary: const Icon(
+                        Icons.volume_up_outlined,
+                        color: AppColors.teal,
+                      ),
                       title: Text(l10n.t('voice_guidance')),
                       subtitle: Text(l10n.t('voice_guidance_body')),
                       value: settings.voiceGuidance,
@@ -292,103 +433,41 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              _SectionLabel(label: l10n.t('notifications')),
-              Card(
-                child: Column(
-                  children: [
-                    SwitchListTile(
-                      secondary: const Icon(Icons.notifications_outlined, color: AppColors.teal),
-                      title: Text(l10n.t('notifications')),
-                      subtitle: Text(l10n.t('notifications_body')),
-                      value: settings.notificationsEnabled,
-                      onChanged: settings.setNotificationsEnabled,
-                    ),
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: AppInfoBanner(
-                        icon: Icons.info_outline_rounded,
-                        text: l10n.t('notifications_unconfigured_note'),
-                        color: AppColors.slate,
-                        background: const Color(0xFFF0F5F3),
-                      ),
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 20),
+              _SectionLabel(label: l10n.t('settings_notifications_note')),
+              AppInfoBanner(
+                icon: Icons.notifications_off_outlined,
+                text: l10n.t('notifications_not_supported'),
+                color: AppColors.slate,
+                background: AppColors.neutralSoft,
               ),
-              const SizedBox(height: 16),
-              _SectionLabel(label: l10n.t('emergency')),
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.call_outlined, color: AppColors.danger),
-                  title: Text(l10n.t('emergency_number')),
-                  subtitle: Text(settings.emergencyNumber),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: l10n.t('edit'),
-                        onPressed: () => _editEmergencyNumber(context),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                      IconButton(
-                        tooltip: l10n.t('call'),
-                        onPressed: () => _callEmergency(context),
-                        icon: const Icon(Icons.phone_outlined, color: AppColors.danger),
-                      ),
-                    ],
+              const SizedBox(height: 20),
+              _SectionLabel(label: l10n.t('settings_help')),
+              AppListPanel(
+                children: [
+                  AppNavTile(
+                    icon: Icons.help_outline_rounded,
+                    title: l10n.t('help_support'),
+                    subtitle: l10n.t('help_support_body'),
+                    onTap: () => _open(context, const HelpAboutScreen()),
                   ),
-                ),
+                  AppNavTile(
+                    icon: Icons.info_outline_rounded,
+                    title: l10n.t('about_healthmate'),
+                    subtitle: l10n.t('settings_version')
+                        .replaceAll('{version}', '1.0.0'),
+                    onTap: () => _open(context, const HelpAboutScreen()),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              _SectionLabel(label: l10n.t('about_and_data')),
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.dataset_outlined, color: AppColors.teal),
-                      title: Text(l10n.t('data_sources')),
-                      subtitle: Text(l10n.t('data_sources_short')),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => _showSources(context),
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.teal),
-                      title: Text(l10n.t('privacy')),
-                      subtitle: Text(l10n.t('privacy_body')),
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () {
-                        showDialog<void>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text(l10n.t('privacy')),
-                            content: Text(l10n.t('privacy_detail')),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(),
-                                child: Text(l10n.t('close')),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.info_outline_rounded, color: AppColors.teal),
-                      title: Text(l10n.t('app_version')),
-                      subtitle: const Text('HealthMate 1.0.0'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 22),
               Text(
-                l10n.t('settings_disclaimer'),
+                l10n.t('settings_local_first_note'),
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(fontSize: 11.5, height: 1.5),
               ),
             ],
           ),
@@ -413,29 +492,8 @@ class _SectionLabel extends StatelessWidget {
               color: AppColors.slate,
               fontWeight: FontWeight.w700,
               fontSize: 12.5,
-              letterSpacing: 0.2,
             ),
       ),
-    );
-  }
-}
-
-class _SourceTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _SourceTile({required this.title, required this.subtitle, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.public_rounded, color: AppColors.teal),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-      trailing: const Icon(Icons.open_in_new_rounded, size: 18, color: AppColors.muted),
-      onTap: onTap,
     );
   }
 }

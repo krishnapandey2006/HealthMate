@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -142,8 +143,14 @@ class ReportService {
     double? longitude,
   }) async {
     final now = DateTime.now();
-    final localId = 'local_${now.millisecondsSinceEpoch}';
-    final reference = 'HM-${now.millisecondsSinceEpoch.toString().substring(6)}';
+    // Millisecond timestamps are not unique when two reports are submitted in
+    // quick succession. Add randomness so neither the id nor the visible
+    // reference can collide, which would silently drop an existing report.
+    // Keep the random bound below 2^31 for dart2js compatibility.
+    final suffix = Random.secure().nextInt(0x7fffffff).toRadixString(16);
+    final localId = 'local_${now.millisecondsSinceEpoch}_$suffix';
+    final reference =
+        'HM-${now.millisecondsSinceEpoch.toString().substring(6)}-${suffix.substring(0, 4).toUpperCase()}';
     final report = HealthReport(
       id: localId,
       reference: reference,

@@ -18,6 +18,26 @@ class PlaceResult {
   });
 }
 
+/// Human-readable place details for a set of coordinates, used only when the
+/// user explicitly asks HealthMate to detect their area.
+class DetectedPlace {
+  final String displayName;
+  final String state;
+  final String city;
+  final String postcode;
+  final double latitude;
+  final double longitude;
+
+  const DetectedPlace({
+    required this.displayName,
+    required this.state,
+    required this.city,
+    required this.postcode,
+    required this.latitude,
+    required this.longitude,
+  });
+}
+
 class FacilityResult {
   final List<Facility> facilities;
   final String? warning;
@@ -86,6 +106,82 @@ class FacilityService {
       // Return an empty list; the UI explains that search is unavailable.
     }
     return const [];
+  }
+
+  Future<DetectedPlace?> reverseGeocode({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final json = await _api.getJson(
+        '/api/geocode',
+        query: {
+          'reverse': '1',
+          'lat': latitude.toStringAsFixed(5),
+          'lon': longitude.toStringAsFixed(5),
+        },
+        timeout: const Duration(seconds: 15),
+        retries: 0,
+      );
+      final raw = json['result'];
+      if (raw is Map) {
+        final place = _detectedFromMap(Map<String, dynamic>.from(raw));
+        if (place != null) return place;
+      }
+    } on ApiException {
+      // Try a direct Nominatim reverse request as a fallback. The browser
+      // Nominatim endpoint permits CORS; the app still never sends location
+      // unless the user tapped a location action.
+    }
+
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1&lat=$latitude&lon=$longitude',
+      );
+      final response = await _directClient.get(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'HealthMate/1.0 (local profile setup)',
+        },
+      ).timeout(const Duration(seconds: 12));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          return _detectedFromMap(Map<String, dynamic>.from(decoded));
+        }
+      }
+    } catch (_) {
+      // The profile setup screen explains that automatic detection failed and
+      // lets the user choose manually.
+    }
+    return null;
+  }
+
+  DetectedPlace? _detectedFromMap(Map<String, dynamic> map) {
+    final address = map['address'] is Map
+        ? Map<String, dynamic>.from(map['address'] as Map)
+        : <String, dynamic>{};
+    final displayName =
+        (map['display_name'] ?? map['name'] ?? '').toString().trim();
+    final state = (map['state'] ?? address['state'] ?? '').toString().trim();
+    final city = (map['city'] ??
+            address['city'] ??
+            address['town'] ??
+            address['village'] ??
+            address['county'] ??
+            '')
+        .toString()
+        .trim();
+    if (displayName.isEmpty && state.isEmpty && city.isEmpty) return null;
+    return DetectedPlace(
+      displayName: displayName,
+      state: state,
+      city: city,
+      postcode: (map['postcode'] ?? address['postcode'] ?? '').toString().trim(),
+      latitude: _asDouble(map['lat']),
+      longitude: _asDouble(map['lon']),
+    );
   }
 
   PlaceResult? _placeFromMap(Map<String, dynamic> map) {

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../app/theme.dart';
+import '../health_news_screen.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/app_widgets.dart';
-import 'book_screen.dart';
+import 'appointments_screen.dart';
+import 'health_hub_screen.dart';
 import 'home_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
-import 'vaccine_screen.dart';
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({super.key});
@@ -21,8 +22,9 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   static const _pages = <Widget>[
     HomeScreen(),
-    VaccineScreen(),
-    BookScreen(),
+    AppointmentsScreen(),
+    HealthHubScreen(),
+    HealthNewsScreen(),
     ProfileScreen(),
   ];
 
@@ -38,8 +40,11 @@ class _MainScaffoldState extends State<MainScaffold> {
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final destinations = [
       _Destination(Icons.home_outlined, Icons.home_rounded, l10n.t('home')),
-      _Destination(Icons.vaccines_outlined, Icons.vaccines_rounded, l10n.t('vaccines')),
-      _Destination(Icons.calendar_month_outlined, Icons.calendar_month_rounded, l10n.t('appointments')),
+      _Destination(Icons.calendar_month_outlined, Icons.calendar_month_rounded,
+          l10n.t('appointments')),
+      _Destination(Icons.health_and_safety_outlined, Icons.health_and_safety_rounded,
+          l10n.t('health')),
+      _Destination(Icons.newspaper_outlined, Icons.newspaper_rounded, l10n.t('news')),
       _Destination(Icons.person_outline_rounded, Icons.person_rounded, l10n.t('profile')),
     ];
 
@@ -83,7 +88,10 @@ class _MainScaffoldState extends State<MainScaffold> {
               ),
             ),
             Expanded(
-              child: IndexedStack(index: _index, children: _pages),
+              child: MainTabScope(
+                selectTab: (value) => setState(() => _index = value),
+                child: IndexedStack(index: _index, children: _pages),
+              ),
             ),
           ],
         ),
@@ -91,7 +99,10 @@ class _MainScaffoldState extends State<MainScaffold> {
     }
 
     return Scaffold(
-      body: IndexedStack(index: _index, children: _pages),
+      body: MainTabScope(
+        selectTab: (value) => setState(() => _index = value),
+        child: IndexedStack(index: _index, children: _pages),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
@@ -114,4 +125,21 @@ class _Destination {
   final String label;
 
   const _Destination(this.icon, this.selectedIcon, this.label);
+}
+
+/// Lets dashboard cards switch the main tab without pushing a duplicate screen.
+class MainTabScope extends InheritedWidget {
+  final ValueChanged<int> selectTab;
+
+  const MainTabScope({
+    super.key,
+    required this.selectTab,
+    required super.child,
+  });
+
+  static MainTabScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MainTabScope>();
+
+  @override
+  bool updateShouldNotify(MainTabScope oldWidget) => false;
 }

@@ -19,6 +19,17 @@ class LanguageProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> resetToDefault() async {
+    _languageCode = 'en';
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('language_code');
+    } catch (_) {
+      // The in-memory language is still reset for this session.
+    }
+  }
+
   // Load saved language from SharedPreferences if available
   Future<void> init() async {
     try {

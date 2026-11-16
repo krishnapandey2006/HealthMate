@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app/theme.dart';
+import '../services/app_lock_provider.dart';
 import '../services/profile_provider.dart';
+import 'app_lock_screen.dart';
 import 'main_scaffold.dart';
 import 'profile_setup_screen.dart';
+import 'welcome_screen.dart';
 
 /// Decides between local profile setup and the dashboard.
 ///
@@ -16,13 +19,19 @@ class AppGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final profileProvider = context.watch<ProfileProvider>();
+    final appLock = context.watch<AppLockProvider>();
 
-    if (profileProvider.loading) {
+    if (profileProvider.loading || !appLock.initialized) {
       return const _GateLoading();
     }
 
+    if (appLock.locked) {
+      return const AppLockScreen();
+    }
+
     if (profileProvider.needsSetup) {
-      return const ProfileSetupScreen();
+      if (profileProvider.hasProfile) return const ProfileSetupScreen();
+      return const WelcomeScreen();
     }
 
     return const MainScaffold();

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
+import '../services/app_lock_provider.dart';
+import '../services/appointment_provider.dart';
 import '../services/profile_provider.dart';
 import '../widgets/app_widgets.dart';
 import 'app_gate.dart';
@@ -33,7 +35,14 @@ class _AppBootstrapState extends State<AppBootstrap> {
 
     try {
       if (!mounted) return;
-      await context.read<ProfileProvider>().initialize();
+      final profile = context.read<ProfileProvider>();
+      final appointments = context.read<AppointmentProvider>();
+      final appLock = context.read<AppLockProvider>();
+      await Future.wait([
+        profile.initialize(),
+        appointments.initialize(),
+        appLock.initialize(),
+      ]);
       if (!mounted) return;
       setState(() => _ready = true);
     } catch (_) {

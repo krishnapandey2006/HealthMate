@@ -5,47 +5,364 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/theme.dart';
 import '../l10n/app_localizations.dart';
 
-class AppLogo extends StatelessWidget {
+/// The HealthMate mark is drawn in code so it stays crisp at every size and
+/// does not depend on a stale raster asset. The medical cross sits on the brand
+/// green with a quiet ECG line through it.
+class AppMark extends StatelessWidget {
   final double size;
-  final bool showWordmark;
+  final bool withShadow;
 
-  const AppLogo({super.key, this.size = 44, this.showWordmark = false});
+  const AppMark({super.key, this.size = 44, this.withShadow = false});
 
   @override
   Widget build(BuildContext context) {
-    final logo = ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.24),
-      child: Image.asset(
-        'assets/logo.png',
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: AppColors.tealSoft,
-            borderRadius: BorderRadius.circular(size * 0.24),
-          ),
-          child: Icon(Icons.health_and_safety_rounded, color: AppColors.teal, size: size * 0.58),
-        ),
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: AppColors.heroGradient,
+        borderRadius: BorderRadius.circular(size * 0.28),
+        boxShadow: withShadow ? AppShadows.brand : null,
       ),
+      child: CustomPaint(painter: _AppMarkPainter()),
     );
+  }
+}
+
+class _AppMarkPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final crossPaint = Paint()
+      ..color = Colors.white
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = size.width * 0.15;
+    final arm = size.width * 0.25;
+    canvas.drawLine(
+      Offset(center.dx - arm, center.dy),
+      Offset(center.dx + arm, center.dy),
+      crossPaint,
+    );
+    canvas.drawLine(
+      Offset(center.dx, center.dy - arm),
+      Offset(center.dx, center.dy + arm),
+      crossPaint,
+    );
+
+    final pulse = Paint()
+      ..color = AppColors.teal
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.062
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()
+      ..moveTo(size.width * 0.18, center.dy)
+      ..lineTo(size.width * 0.34, center.dy)
+      ..lineTo(size.width * 0.42, center.dy - size.height * 0.12)
+      ..lineTo(size.width * 0.52, center.dy + size.height * 0.12)
+      ..lineTo(size.width * 0.60, center.dy)
+      ..lineTo(size.width * 0.82, center.dy);
+    canvas.drawPath(path, pulse);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class AppLogo extends StatelessWidget {
+  final double size;
+  final bool showWordmark;
+  final bool withShadow;
+
+  const AppLogo({
+    super.key,
+    this.size = 44,
+    this.showWordmark = false,
+    this.withShadow = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final logo = AppMark(size: size, withShadow: withShadow);
 
     if (!showWordmark) return logo;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         logo,
-        const SizedBox(width: 10),
+        const SizedBox(width: 11),
         Text(
           'HealthMate',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
+                fontSize: size > 40 ? 22 : 19,
+                letterSpacing: -0.7,
+                color: AppColors.navy,
               ),
         ),
       ],
+    );
+  }
+}
+
+/// A card with consistent padding and optional tap behaviour. Use this instead
+/// of building one-off decorated containers so every surface shares the same
+/// radius, border and interaction feedback.
+class AppCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final VoidCallback? onTap;
+  final Color? color;
+  final bool clip;
+  final BorderRadius? borderRadius;
+  final Border? border;
+
+  const AppCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(18),
+    this.onTap,
+    this.color,
+    this.clip = false,
+    this.borderRadius,
+    this.border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = borderRadius ?? BorderRadius.circular(AppRadii.lg);
+    final decoration = BoxDecoration(
+      color: color ?? AppColors.surface,
+      borderRadius: radius,
+      border: border ?? Border.all(color: AppColors.border),
+      boxShadow: AppShadows.card,
+    );
+    final content = Padding(padding: padding, child: child);
+    if (onTap == null) {
+      return DecoratedBox(
+        decoration: decoration,
+        child: clip
+            ? ClipRRect(borderRadius: radius, child: content)
+            : content,
+      );
+    }
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: decoration,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: radius,
+          child: clip
+              ? ClipRRect(borderRadius: radius, child: content)
+              : content,
+        ),
+      ),
+    );
+  }
+}
+
+class AppSectionHeading extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final EdgeInsetsGeometry padding;
+
+  const AppSectionHeading({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.actionLabel,
+    this.onAction,
+    this.padding = const EdgeInsets.only(bottom: 12),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: padding,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.25,
+                      ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (actionLabel != null && onAction != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(actionLabel!),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small label used above section titles to group content without adding
+/// another heavy visual element.
+class AppEyebrow extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const AppEyebrow(this.text, {super.key, this.color = AppColors.tealDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.toUpperCase(),
+      style: TextStyle(
+        color: color,
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.15,
+      ),
+    );
+  }
+}
+
+class AppIconBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final Color background;
+  final double size;
+  final double iconSize;
+
+  const AppIconBadge({
+    super.key,
+    required this.icon,
+    this.color = AppColors.teal,
+    this.background = AppColors.tealSoft,
+    this.size = 46,
+    this.iconSize = 23,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(size * 0.3),
+      ),
+      child: Icon(icon, color: color, size: iconSize),
+    );
+  }
+}
+
+class AppSheetHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final IconData? icon;
+  final Widget? trailing;
+
+  const AppSheetHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.icon,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (icon != null) ...[
+          AppIconBadge(icon: icon!, size: 42, iconSize: 21),
+          const SizedBox(width: 12),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                    ),
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 3),
+                Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ],
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
+}
+
+class AppStatTile extends StatelessWidget {
+  final String value;
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const AppStatTile({
+    super.key,
+    required this.value,
+    required this.label,
+    required this.icon,
+    this.color = AppColors.teal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              color: AppColors.navy,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -198,27 +515,6 @@ class AppStatusChip extends StatelessWidget {
     this.background = AppColors.neutralSoft,
     this.icon,
   });
-
-  factory AppStatusChip.success(String label) => AppStatusChip(
-        label: label,
-        color: AppColors.success,
-        background: AppColors.successSoft,
-        icon: Icons.cloud_done_outlined,
-      );
-
-  factory AppStatusChip.warning(String label) => AppStatusChip(
-        label: label,
-        color: AppColors.warning,
-        background: AppColors.warningSoft,
-        icon: Icons.cloud_off_outlined,
-      );
-
-  factory AppStatusChip.neutral(String label) => AppStatusChip(
-        label: label,
-        color: AppColors.slate,
-        background: AppColors.neutralSoft,
-        icon: Icons.devices_outlined,
-      );
 
   @override
   Widget build(BuildContext context) {

@@ -48,7 +48,9 @@ dependencies:
   share_plus: ^12.0.0
   geolocator: ^13.0.1
   shimmer: ^2.0.0
-  google_fonts: ^6.3.3
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  crypto: ^3.0.8
 
 dev_dependencies:
   flutter_test:
@@ -77,7 +79,6 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-    - assets/logo.png
     - lib/l10n/intl_en.arb
     - lib/l10n/intl_hi.arb
     - lib/l10n/intl_mr.arb
@@ -85,7 +86,11 @@ flutter:
     - lib/l10n/intl_ta.arb
     - lib/l10n/intl_gu.arb
     - assets/campaigns.json
-    - assets/chatbot_data.json
+
+  fonts:
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

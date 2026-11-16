@@ -8,21 +8,22 @@ import '../health_campaigns_screen.dart';
 import '../health_news_screen.dart';
 import '../l10n/app_localizations.dart';
 import '../language_provider.dart';
+import '../models/appointment.dart';
 import '../models/article.dart';
 import '../models/health_campaign.dart';
 import '../services/app_settings_provider.dart';
+import '../services/appointment_provider.dart';
 import '../services/campaign_service.dart';
 import '../services/news_service.dart';
 import '../services/profile_provider.dart';
 import '../services/sos_service.dart';
-import '../services/vaccine_service.dart';
 import '../widgets/app_widgets.dart';
-import 'book_screen.dart';
+import '../widgets/health_calendar.dart';
+import 'appointment_detail_screen.dart';
+import 'main_scaffold.dart';
 import 'nearby_screen.dart';
-import 'profile_screen.dart';
 import 'report_screen.dart';
 import 'settings_screen.dart';
-import 'vaccine_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -32,18 +33,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _newsService = NewsService();
-  final _campaignService = CampaignService();
-  final _vaccinationRepository = VaccinationRepository();
+  final NewsService _newsService = NewsService();
+  final CampaignService _campaignService = CampaignService();
 
   List<Article> _articles = const [];
   List<CampaignView> _campaigns = const [];
   bool _loadingNews = true;
   bool _loadingCampaigns = true;
   String? _newsError;
-  String? _campaignWarning;
-  DateTime? _newsUpdatedAt;
-  int _vaccinationCount = 0;
+  String? _campaignError;
+  String _languageCode = 'en';
 
   @override
   void initState() {
@@ -51,8 +50,20 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadAll());
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final code = context.watch<LanguageProvider>().languageCode;
+    if (code != _languageCode) {
+      _languageCode = code;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadAll();
+      });
+    }
+  }
+
   Future<void> _loadAll() async {
-    await Future.wait([_loadNews(), _loadCampaigns(), _loadVaccinations()]);
+    await Future.wait([_loadNews(), _loadCampaigns()]);
   }
 
   Future<void> _loadNews({bool refresh = false}) async {
@@ -64,9 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final result = await _newsService.fetchPage(
       category: 'all',
-      lang: context.read<LanguageProvider>().languageCode,
+      lang: _languageCode,
       page: 1,
-      limit: 4,
+      limit: 5,
       forceRefresh: refresh,
     );
     if (!mounted) return;
@@ -76,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _newsError = result.isError && result.articles.isEmpty
           ? result.error?.message
           : result.warning;
-      _newsUpdatedAt = result.lastUpdated;
     });
   }
 
@@ -87,31 +97,32 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _loadingCampaigns = false;
       _campaigns = _campaignService.upcoming(DateTime.now()).take(2).toList();
-      _campaignWarning = result.error ?? result.warning;
+      _campaignError = result.error ?? result.warning;
     });
-  }
-
-  Future<void> _loadVaccinations() async {
-    final records = await _vaccinationRepository.load();
-    if (!mounted) return;
-    setState(() => _vaccinationCount = records.length);
   }
 
   Future<void> _refresh() async {
     await _loadAll();
   }
 
+  void _selectTab(int index) {
+    final scope = MainTabScope.maybeOf(context);
+    if (scope != null) {
+      scope.selectTab(index);
+    }
+  }
+
   void _open(Widget screen) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
   }
 
-  Future<void> _showEmergency() async {
-    final settings = context.read<AppSettingsProvider>();
+  void _showEmergency() {
     final l10n = AppLocalizations.of(context);
-    await showModalBottomSheet<void>(
+    final settings = context.read<AppSettingsProvider>();
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
@@ -119,58 +130,23 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: const BoxDecoration(
-                        color: AppColors.dangerSoft,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.emergency_outlined, color: AppColors.danger),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(l10n.t('emergency_help'), style: Theme.of(context).textTheme.titleLarge),
-                          Text(
-                            l10n.t('emergency_help_body'),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                AppSheetHeader(
+                  title: l10n.t('emergency_help'),
+                  subtitle: l10n.t('emergency_help_body'),
+                  icon: Icons.emergency_outlined,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-                  onPressed: () async {
-                    try {
-                      await SOSService.openDialer(settings.emergencyNumber);
-                    } catch (_) {
-                      if (context.mounted) {
-                        showAppSnackBar(context, l10n.t('dialer_unavailable'), isError: true);
-                      }
-                    }
-                  },
+                  onPressed: () => _call(sheetContext, settings.emergencyNumber),
                   icon: const Icon(Icons.call_rounded),
-                  label: Text('${l10n.t('call_emergency')} · ${settings.emergencyNumber}'),
+                  label: Text(
+                    '${l10n.t('call_emergency')} · ${settings.emergencyNumber}',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
-                  onPressed: () async {
-                    try {
-                      await SOSService.openDialer('108');
-                    } catch (_) {
-                      if (context.mounted) {
-                        showAppSnackBar(context, l10n.t('dialer_unavailable'), isError: true);
-                      }
-                    }
-                  },
+                  onPressed: () => _call(sheetContext, '108'),
                   icon: const Icon(Icons.local_hospital_outlined),
                   label: Text(l10n.t('call_ambulance_108')),
                 ),
@@ -183,8 +159,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         l10n.t('sos_message'),
                       );
                     } catch (_) {
-                      if (context.mounted) {
-                        showAppSnackBar(context, l10n.t('sms_unavailable'), isError: true);
+                      if (sheetContext.mounted) {
+                        showAppSnackBar(
+                          sheetContext,
+                          l10n.t('sms_unavailable'),
+                          isError: true,
+                        );
                       }
                     }
                   },
@@ -194,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 14),
                 Text(
                   l10n.t('emergency_disclaimer'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
+                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(fontSize: 11.5),
                 ),
               ],
             ),
@@ -204,19 +184,31 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _call(BuildContext context, String number) async {
+    try {
+      await SOSService.openDialer(number);
+    } catch (_) {
+      if (context.mounted) {
+        showAppSnackBar(
+          context,
+          AppLocalizations.of(context).t('dialer_unavailable'),
+          isError: true,
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final profileProvider = context.watch<ProfileProvider>();
-    final settings = context.watch<AppSettingsProvider>();
+    final appointmentProvider = context.watch<AppointmentProvider>();
     final profile = profileProvider.profile;
     final firstName = profile?.firstName.trim() ?? '';
-    final greeting = firstName.isEmpty ? l10n.t('welcome') : '${l10n.t('namaste')}, $firstName';
     final now = DateTime.now();
-    final hour = now.hour;
-    final timeGreeting = hour < 12
+    final timeGreeting = now.hour < 12
         ? l10n.t('good_morning')
-        : hour < 17
+        : now.hour < 17
             ? l10n.t('good_afternoon')
             : l10n.t('good_evening');
 
@@ -230,19 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
               pinned: true,
               backgroundColor: AppColors.mintBackground,
               titleSpacing: 16,
-              title: Row(
-                children: [
-                  const AppLogo(size: 34),
-                  const SizedBox(width: 10),
-                  Text(
-                    'HealthMate',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 19,
-                        ),
-                  ),
-                ],
-              ),
+              title: const AppLogo(size: 32, showWordmark: true),
               actions: [
                 IconButton(
                   tooltip: l10n.t('settings_title'),
@@ -250,17 +230,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: const Icon(Icons.settings_outlined),
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.only(right: 14, left: 2),
                   child: GestureDetector(
-                    onTap: () => _open(const ProfileScreen()),
+                    onTap: () => _selectTab(4),
                     child: CircleAvatar(
                       radius: 18,
                       backgroundColor: AppColors.tealSoft,
                       child: Text(
-                        firstName.isEmpty ? 'H' : firstName.substring(0, 1).toUpperCase(),
+                        firstName.isEmpty
+                            ? 'H'
+                            : firstName.substring(0, 1).toUpperCase(),
                         style: const TextStyle(
                           color: AppColors.tealDark,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
@@ -270,83 +252,148 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             SliverToBoxAdapter(
               child: ResponsiveBody(
-                maxWidth: 980,
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+                maxWidth: 920,
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 34),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '$timeGreeting, $greeting',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppColors.slate,
-                            fontWeight: FontWeight.w500,
-                          ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l10n.t('home_subtitle'),
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 26),
-                    ),
-                    const SizedBox(height: 18),
-                    _SetupSummaryCard(
-                      profileComplete: profileProvider.isComplete,
-                      vaccinations: _vaccinationCount,
-                      onTap: () => _open(const ProfileScreen()),
-                    ),
-                    const SizedBox(height: 14),
-                    _EmergencyStrip(
-                      number: settings.emergencyNumber,
-                      onTap: _showEmergency,
-                    ),
-                    const SizedBox(height: 24),
-                    SectionHeader(
-                      title: l10n.t('quick_actions'),
-                      actionLabel: null,
-                    ),
-                    const SizedBox(height: 12),
-                    _QuickActions(
-                      onNearby: () => _open(const NearbyScreen()),
-                      onReport: () => _open(const ReportScreen()),
-                      onBook: () => _open(const BookScreen()),
-                      onVaccines: () => _open(const VaccineScreen()),
-                      onNews: () => _open(const HealthNewsScreen()),
-                      onCampaigns: () => _open(const HealthCampaignsScreen()),
-                    ),
-                    const SizedBox(height: 28),
-                    SectionHeader(
-                      title: l10n.t('latest_health_news'),
-                      actionLabel: l10n.t('see_all'),
-                      onAction: () => _open(const HealthNewsScreen()),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildNewsSection(l10n),
-                    const SizedBox(height: 28),
-                    SectionHeader(
-                      title: l10n.t('verified_campaigns'),
-                      actionLabel: l10n.t('see_all'),
-                      onAction: () => _open(const HealthCampaignsScreen()),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildCampaignSection(l10n),
-                    const SizedBox(height: 28),
-                    AppListPanel(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        AppNavTile(
-                          icon: profileProvider.isComplete
-                              ? Icons.verified_user_outlined
-                              : Icons.person_outline_rounded,
-                          title: l10n.t('profile_status_title'),
-                          subtitle: l10n.t('sync_device_only'),
-                          trailing: AppStatusChip.neutral(l10n.t('local')),
-                          onTap: () => _open(const ProfileScreen()),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$timeGreeting${firstName.isEmpty ? '' : ', $firstName'}',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: AppColors.tealDark,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                l10n.t('home_hero_title'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(
+                                      fontSize: 27,
+                                      letterSpacing: -0.7,
+                                      height: 1.15,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          formatFriendlyDate(now, includeWeekday: true)
+                              .replaceAll(', ${now.year}', ''),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontSize: 11.5,
+                              ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    _NextVisitCard(
+                      next: appointmentProvider.nextAppointment,
+                      onView: appointmentProvider.nextAppointment == null
+                          ? () => _selectTab(1)
+                          : () {
+                              final next = appointmentProvider.nextAppointment;
+                              if (next != null) {
+                                _open(AppointmentDetailScreen(appointmentId: next.id));
+                              }
+                            },
+                      onAdd: () => _selectTab(1),
+                    ),
+                    const SizedBox(height: 12),
+                    _EmergencyStrip(
+                      number: context.watch<AppSettingsProvider>().emergencyNumber,
+                      onTap: _showEmergency,
+                    ),
+                    const SizedBox(height: 22),
+                    AppSectionHeading(
+                      title: l10n.t('quick_actions'),
+                      subtitle: l10n.t('home_quick_actions_body'),
+                    ),
+                    _QuickGrid(
+                      onNearby: () => _open(const NearbyScreen()),
+                      onAppointments: () => _selectTab(1),
+                      onHealth: () => _selectTab(2),
+                      onReport: () => _open(const ReportScreen()),
+                    ),
                     const SizedBox(height: 24),
+                    AppSectionHeading(
+                      title: l10n.t('latest_health_news'),
+                      actionLabel: l10n.t('see_all'),
+                      onAction: () => _selectTab(3),
+                    ),
+                    _buildNews(l10n),
+                    const SizedBox(height: 24),
+                    AppSectionHeading(
+                      title: l10n.t('health_campaigns'),
+                      actionLabel: l10n.t('see_all'),
+                      onAction: () => _open(const HealthCampaignsScreen()),
+                    ),
+                    _buildCampaigns(l10n),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(AppRadii.lg),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Row(
+                        children: [
+                          const AppIconBadge(
+                            icon: Icons.smartphone_outlined,
+                            size: 42,
+                            iconSize: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  profileProvider.isComplete
+                                      ? l10n.t('profile_complete')
+                                      : l10n.t('profile_incomplete'),
+                                  style: const TextStyle(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  l10n.t('home_local_footer'),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(fontSize: 11.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => _selectTab(4),
+                            child: Text(l10n.t('view_profile')),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
                     Text(
                       l10n.t('home_disclaimer'),
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(fontSize: 11.5),
                     ),
                   ],
                 ),
@@ -358,7 +405,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNewsSection(AppLocalizations l10n) {
+  Widget _buildNews(AppLocalizations l10n) {
     if (_loadingNews) {
       return const Column(
         children: [
@@ -373,14 +420,14 @@ class _HomeScreenState extends State<HomeScreen> {
         icon: Icons.newspaper_outlined,
         text: _newsError ?? l10n.t('no_updates'),
         color: _newsError == null ? AppColors.slate : AppColors.warning,
-        background: _newsError == null ? const Color(0xFFF0F5F3) : AppColors.warningSoft,
+        background:
+            _newsError == null ? AppColors.neutralSoft : AppColors.warningSoft,
         trailing: TextButton(
           onPressed: () => _loadNews(refresh: true),
           child: Text(l10n.t('retry')),
         ),
       );
     }
-
     return Column(
       children: [
         if (_newsError != null) ...[
@@ -392,51 +439,38 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 10),
         ],
-        AppListPanel(
-          children: [
-            for (var i = 0; i < _articles.length; i++)
-              _CompactArticleCard(
-                article: _articles[i],
-                featured: i == 0,
-                onTap: () => _open(HealthNewsScreen(initialArticle: _articles[i])),
-              ),
-          ],
-        ),
-        if (_newsUpdatedAt != null) ...[
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              '${l10n.t('last_updated')} ${formatShortDate(_newsUpdatedAt!, l10n)}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
-            ),
+        for (var i = 0; i < _articles.length; i++) ...[
+          _NewsPreview(
+            article: _articles[i],
+            featured: i == 0,
+            onTap: () => _open(HealthNewsScreen(initialArticle: _articles[i])),
           ),
+          if (i != _articles.length - 1) const SizedBox(height: 8),
         ],
       ],
     );
   }
 
-  Widget _buildCampaignSection(AppLocalizations l10n) {
+  Widget _buildCampaigns(AppLocalizations l10n) {
     if (_loadingCampaigns) {
       return const ArticleSkeleton();
     }
     if (_campaigns.isEmpty) {
       return AppInfoBanner(
         icon: Icons.event_busy_outlined,
-        text: _campaignWarning ?? l10n.t('no_upcoming_campaigns'),
+        text: _campaignError ?? l10n.t('no_upcoming_campaigns'),
         color: AppColors.slate,
-        background: const Color(0xFFF0F5F3),
+        background: AppColors.neutralSoft,
         trailing: TextButton(
           onPressed: () => _loadCampaigns(refresh: true),
           child: Text(l10n.t('retry')),
         ),
       );
     }
-
     return AppListPanel(
       children: [
         for (var i = 0; i < _campaigns.length; i++)
-          _CampaignPreviewCard(
+          _CampaignPreview(
             view: _campaigns[i],
             onTap: () => _open(const HealthCampaignsScreen()),
           ),
@@ -445,118 +479,158 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _SetupSummaryCard extends StatelessWidget {
-  final bool profileComplete;
-  final int vaccinations;
-  final VoidCallback onTap;
+class _NextVisitCard extends StatelessWidget {
+  final Appointment? next;
+  final VoidCallback onView;
+  final VoidCallback onAdd;
 
-  const _SetupSummaryCard({
-    required this.profileComplete,
-    required this.vaccinations,
-    required this.onTap,
+  const _NextVisitCard({
+    required this.next,
+    required this.onView,
+    required this.onAdd,
   });
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 16, 12, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final appointment = next;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppColors.heroGradient,
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        boxShadow: AppShadows.brand,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      l10n.t('setup_title'),
-                      style: Theme.of(context).textTheme.titleMedium,
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.favorite_outline_rounded,
+                  color: Colors.white,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  appointment == null
+                      ? l10n.t('home_no_visits_title')
+                      : l10n.t('home_next_visit'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (appointment != null)
+                AppStatusChip(
+                  label: l10n.t('upcoming'),
+                  color: AppColors.tealDeep,
+                  background: Colors.white,
+                  icon: Icons.event_available_outlined,
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (appointment == null) ...[
+            Text(
+              l10n.t('home_no_visits_body'),
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.86),
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: onAdd,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.tealDeep,
+              ),
+              icon: const Icon(Icons.add_rounded),
+              label: Text(l10n.t('add_appointment')),
+            ),
+          ] else ...[
+            Text(
+              appointment.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 23,
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.schedule_rounded,
+                  color: Colors.white.withValues(alpha: 0.82),
+                  size: 16,
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    '${formatFriendlyDate(appointment.scheduledAt, includeWeekday: true)} · ${formatClockTime(TimeOfDay.fromDateTime(appointment.scheduledAt))}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 12.5,
                     ),
                   ),
-                  IconButton(
-                    onPressed: onTap,
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-                    tooltip: l10n.t('view_profile'),
+                ),
+              ],
+            ),
+            if (appointment.provider.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    Icons.place_outlined,
+                    color: Colors.white.withValues(alpha: 0.82),
+                    size: 16,
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      [appointment.provider, appointment.location]
+                          .where((value) => value.isNotEmpty)
+                          .join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Text(
-                  l10n.t('setup_note'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12.5),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _SetupLine(
-                label: l10n.t('profile'),
-                value: profileComplete
-                    ? l10n.t('profile_complete')
-                    : l10n.t('profile_incomplete'),
-                attention: !profileComplete,
-              ),
-              const Padding(
-                padding: EdgeInsets.only(left: 27),
-                child: Divider(),
-              ),
-              _SetupLine(
-                label: l10n.t('records_saved_label'),
-                value: '$vaccinations',
-                attention: vaccinations == 0,
-              ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SetupLine extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool attention;
-
-  const _SetupLine({
-    required this.label,
-    required this.value,
-    this.attention = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: attention ? AppColors.warning : AppColors.teal,
+            const SizedBox(height: 13),
+            OutlinedButton.icon(
+              onPressed: onView,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
+              ),
+              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+              label: Text(l10n.t('view_details')),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 13.5, color: AppColors.slate),
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.navy,
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -581,13 +655,13 @@ class _EmergencyStrip extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.dangerSoft,
             borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: AppColors.danger.withValues(alpha: 0.20)),
+            border: Border.all(color: AppColors.danger.withValues(alpha: 0.18)),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
           child: Row(
             children: [
-              const Icon(Icons.emergency_outlined, color: AppColors.danger, size: 22),
-              const SizedBox(width: 12),
+              const Icon(Icons.emergency_outlined, color: AppColors.danger, size: 21),
+              const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -597,27 +671,26 @@ class _EmergencyStrip extends StatelessWidget {
                       style: const TextStyle(
                         color: AppColors.danger,
                         fontWeight: FontWeight.w700,
-                        fontSize: 15,
+                        fontSize: 14,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       l10n.t('emergency_help_short'),
                       style: TextStyle(
-                        color: AppColors.danger.withValues(alpha: 0.86),
-                        fontSize: 12.5,
+                        color: AppColors.danger.withValues(alpha: 0.82),
+                        fontSize: 11.5,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
               Text(
                 number,
                 style: const TextStyle(
                   color: AppColors.danger,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
                   letterSpacing: 0.3,
                 ),
               ),
@@ -630,57 +703,109 @@ class _EmergencyStrip extends StatelessWidget {
   }
 }
 
-class _QuickActions extends StatelessWidget {
+class _QuickGrid extends StatelessWidget {
   final VoidCallback onNearby;
+  final VoidCallback onAppointments;
+  final VoidCallback onHealth;
   final VoidCallback onReport;
-  final VoidCallback onBook;
-  final VoidCallback onVaccines;
-  final VoidCallback onNews;
-  final VoidCallback onCampaigns;
 
-  const _QuickActions({
+  const _QuickGrid({
     required this.onNearby,
+    required this.onAppointments,
+    required this.onHealth,
     required this.onReport,
-    required this.onBook,
-    required this.onVaccines,
-    required this.onNews,
-    required this.onCampaigns,
   });
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final actions = [
-      (Icons.near_me_outlined, l10n.t('nearby'), onNearby),
-      (Icons.report_problem_outlined, l10n.t('report'), onReport),
-      (Icons.calendar_month_outlined, l10n.t('appointments'), onBook),
-      (Icons.vaccines_outlined, l10n.t('vaccines'), onVaccines),
-      (Icons.newspaper_outlined, l10n.t('news'), onNews),
-      (Icons.campaign_outlined, l10n.t('campaigns'), onCampaigns),
+    final items = [
+      _QuickItem(
+        icon: Icons.near_me_outlined,
+        title: l10n.t('nearby_care'),
+        subtitle: l10n.t('home_quick_nearby'),
+        color: AppColors.teal,
+        background: AppColors.tealSoft,
+        onTap: onNearby,
+      ),
+      _QuickItem(
+        icon: Icons.calendar_month_outlined,
+        title: l10n.t('appointments'),
+        subtitle: l10n.t('home_quick_visits'),
+        color: AppColors.info,
+        background: AppColors.infoSoft,
+        onTap: onAppointments,
+      ),
+      _QuickItem(
+        icon: Icons.health_and_safety_outlined,
+        title: l10n.t('health_records'),
+        subtitle: l10n.t('home_quick_records'),
+        color: AppColors.success,
+        background: AppColors.successSoft,
+        onTap: onHealth,
+      ),
+      _QuickItem(
+        icon: Icons.report_problem_outlined,
+        title: l10n.t('report_a_concern'),
+        subtitle: l10n.t('home_quick_report'),
+        color: AppColors.warning,
+        background: AppColors.warningSoft,
+        onTap: onReport,
+      ),
     ];
-
-    List<Widget> tiles(Iterable<(IconData, String, VoidCallback)> slice) => [
-          for (final action in slice)
-            AppNavTile(
-              icon: action.$1,
-              title: action.$2,
-              onTap: action.$3,
-              titleSize: 14.5,
-            ),
-        ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 640) {
-          return AppListPanel(children: tiles(actions));
-        }
-        final half = (actions.length / 2).ceil();
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        final wide = constraints.maxWidth >= 680;
+        final columns = wide ? 4 : 2;
+        return GridView.count(
+          crossAxisCount: columns,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: wide ? 1.15 : 1.36,
           children: [
-            Expanded(child: AppListPanel(children: tiles(actions.take(half)))),
-            const SizedBox(width: 12),
-            Expanded(child: AppListPanel(children: tiles(actions.skip(half)))),
+            for (final item in items)
+              AppCard(
+                onTap: item.onTap,
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 39,
+                      height: 39,
+                      decoration: BoxDecoration(
+                        color: item.background,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(item.icon, size: 20, color: item.color),
+                    ),
+                    const Spacer(),
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
           ],
         );
       },
@@ -688,136 +813,131 @@ class _QuickActions extends StatelessWidget {
   }
 }
 
-class _CompactArticleCard extends StatelessWidget {
+class _QuickItem {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final Color background;
+  final VoidCallback onTap;
+
+  const _QuickItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.background,
+    required this.onTap,
+  });
+}
+
+class _NewsPreview extends StatelessWidget {
   final Article article;
   final bool featured;
   final VoidCallback onTap;
 
-  const _CompactArticleCard({
+  const _NewsPreview({
     required this.article,
+    required this.featured,
     required this.onTap,
-    this.featured = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final meta = Row(
-      children: [
-        Flexible(
-          child: Text(
-            article.source,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11.5,
-              color: AppColors.tealDark,
-              fontWeight: FontWeight.w600,
+    final thumbnail = article.thumbnail == null
+        ? Container(
+            color: AppColors.tealSoft,
+            child: const Icon(
+              Icons.health_and_safety_outlined,
+              color: AppColors.teal,
             ),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          '· ${formatShortDate(article.publishedDate, l10n)}',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
-        ),
-      ],
-    );
+          )
+        : Image.network(
+            article.thumbnail!,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              color: AppColors.tealSoft,
+              child: const Icon(
+                Icons.health_and_safety_outlined,
+                color: AppColors.teal,
+              ),
+            ),
+          );
 
-    return InkWell(
+    return AppCard(
       onTap: onTap,
+      clip: true,
+      padding: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: featured
-            ? Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                    child: SizedBox(
-                      width: 92,
-                      height: 92,
-                      child: _ArticleThumb(article: article),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          article.title,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            height: 1.32,
-                            color: AppColors.navy,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          article.summary,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12.5),
-                        ),
-                        const SizedBox(height: 8),
-                        meta,
-                      ],
-                    ),
-                  ),
-                ],
-              )
-            : Column(
+        padding: const EdgeInsets.all(13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: SizedBox(
+                width: featured ? 100 : 78,
+                height: featured ? 100 : 78,
+                child: thumbnail,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     article.title,
-                    maxLines: 2,
+                    maxLines: featured ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      height: 1.35,
+                    style: TextStyle(
                       color: AppColors.navy,
+                      fontSize: featured ? 15 : 13.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.32,
                     ),
                   ),
                   const SizedBox(height: 5),
-                  meta,
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          article.source,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.tealDark,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '· ${formatShortDate(article.publishedDate, l10n)}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(fontSize: 10.5),
+                      ),
+                    ],
+                  ),
                 ],
               ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _ArticleThumb extends StatelessWidget {
-  final Article article;
-
-  const _ArticleThumb({required this.article});
-
-  @override
-  Widget build(BuildContext context) {
-    final placeholder = Container(
-      color: AppColors.tealSoft,
-      child: const Icon(Icons.health_and_safety_outlined, color: AppColors.teal),
-    );
-    if (article.thumbnail == null) return placeholder;
-    return Image.network(
-      article.thumbnail!,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => placeholder,
-    );
-  }
-}
-
-class _CampaignPreviewCard extends StatelessWidget {
+class _CampaignPreview extends StatelessWidget {
   final CampaignView view;
   final VoidCallback onTap;
 
-  const _CampaignPreviewCard({required this.view, required this.onTap});
+  const _CampaignPreview({required this.view, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -826,32 +946,39 @@ class _CampaignPreviewCard extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 44,
+            Container(
+              width: 45,
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              decoration: BoxDecoration(
+                color: ongoing ? AppColors.successSoft : AppColors.tealSoft,
+                borderRadius: BorderRadius.circular(11),
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     view.start.day.toString().padLeft(2, '0'),
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.tealDark,
-                      height: 1.1,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: ongoing ? AppColors.success : AppColors.tealDark,
+                      height: 1.05,
                     ),
                   ),
                   Text(
-                    _monthShort(view.start.month),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                    _month(view.start.month),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: ongoing ? AppColors.success : AppColors.tealDark,
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -863,21 +990,24 @@ class _CampaignPreviewCard extends StatelessWidget {
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       color: AppColors.navy,
-                      fontSize: 14.5,
+                      fontSize: 13.5,
                       height: 1.32,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
-                    '${view.campaign.organizer} · ${view.campaign.sourceName}',
+                    view.campaign.organizer,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(fontSize: 11),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             AppStatusChip(
               label: ongoing ? l10n.t('ongoing') : l10n.t('upcoming'),
               color: ongoing ? AppColors.success : AppColors.tealDark,
@@ -889,11 +1019,11 @@ class _CampaignPreviewCard extends StatelessWidget {
     );
   }
 
-  static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-
-  String _monthShort(int month) => _months[(month - 1).clamp(0, 11)];
+  static String _month(int month) {
+    const months = [
+      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    ];
+    return months[(month - 1).clamp(0, 11)];
+  }
 }
-

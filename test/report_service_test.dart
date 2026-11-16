@@ -8,84 +8,103 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Future<ReportService> service() async {
-    SharedPreferences.setMockInitialValues({});
+  Future<ReportService> service([
+    Map<String, Object> values = const {},
+  ]) async {
+    SharedPreferences.setMockInitialValues(values);
     final prefs = await SharedPreferences.getInstance();
     return ReportService(prefs: prefs);
   }
 
-  test('signed-out report is saved locally with a local reference only', () async {
-    final reportService = await service();
-    final result = await reportService.submitReport(
+  test('a report is saved locally with a device reference', () async {
+    final reports = await service();
+
+    final result = await reports.submitReport(
       type: ReportType.personalConcern,
       category: 'vaccination',
       description: 'The vaccine stock was unavailable at the clinic today.',
       area: 'Pune',
-      uid: null,
     );
 
-    expect(result.cloudSaved, isFalse);
-    expect(result.issue, ReportSaveIssue.signedOut);
-    expect(result.report.reference, startsWith('LOCAL-'));
-    expect(result.report.status, ReportStatus.pendingSync);
+    expect(result.saved, isTrue);
+    expect(result.report.reference, startsWith('HM-'));
+    expect(result.report.status, ReportStatus.saved);
+    expect(result.report.description, contains('vaccine stock'));
 
-    final local = await reportService.loadLocalReports(uid: null);
-    expect(local, hasLength(1));
-    expect(local.single.description, contains('vaccine stock'));
+    final history = await reports.loadHistory();
+    expect(history, hasLength(1));
+    expect(history.single.category, 'vaccination');
+    expect(history.single.area, 'Pune');
   });
 
-  test('device reports are not leaked into a signed-in account history', () async {
-    final reportService = await service();
-    await reportService.submitReport(
-      type: ReportType.personalConcern,
-      category: 'vaccination',
-      description: 'This report belongs to the device-only session.',
-      area: '',
-      uid: null,
-    );
+  test('history is newest first and capped at one hundred reports', () async {
+    final reports = await service();
+    for (var index = 0; index < 105; index++) {
+      await reports.submitReport(
+        type: ReportType.feedback,
+        category: 'other',
+        description: 'Feedback number $index',
+        area: '',
+      );
+    }
 
-    final deviceHistory = await reportService.loadHistory(null);
-    final signedInHistory = await reportService.loadHistory('user-a');
-
-    expect(deviceHistory, hasLength(1));
-    expect(signedInHistory, isEmpty);
+    final history = await reports.loadHistory();
+    expect(history, hasLength(100));
+    expect(history.first.description, contains('104'));
   });
 
-  test('duplicate protection is scoped to the account key', () async {
-    final reportService = await service();
+  test('rapid submissions keep unique ids and references', () async {
+    final reports = await service();
+    for (var index = 0; index < 20; index++) {
+      await reports.submitReport(
+        type: ReportType.feedback,
+        category: 'other',
+        description: 'Rapid report $index',
+        area: '',
+      );
+    }
+
+    final history = await reports.loadHistory();
+    expect(history, hasLength(20));
+    expect(history.map((report) => report.id).toSet(), hasLength(20));
+    expect(history.map((report) => report.reference).toSet(), hasLength(20));
+  });
+
+  test('duplicate protection applies to the same text within two minutes',
+      () async {
+    final reports = await service();
     const description = 'A sufficiently long description for duplicate checking.';
 
-    await reportService.submitReport(
+    await reports.submitReport(
       type: ReportType.feedback,
       category: 'other',
       description: description,
       area: '',
-      uid: null,
     );
 
-    expect(await reportService.isDuplicate(null, 'other', description), isTrue);
-    expect(await reportService.isDuplicate('user-a', 'other', description), isFalse);
+    expect(await reports.isDuplicate('other', description), isTrue);
+    expect(await reports.isDuplicate('vaccination', description), isFalse);
+    expect(
+      await reports.isDuplicate('other', 'A different description'),
+      isFalse,
+    );
   });
 
-  test('cloud-not-configured is reported truthfully and still saves locally', () async {
-    final reportService = await service();
-    final result = await reportService.submitReport(
+  test('clearAll removes reports and duplicate state', () async {
+    final reports = await service();
+    await reports.submitReport(
       type: ReportType.feedback,
       category: 'other',
-      description: 'The app should explain when cloud submission is unavailable.',
+      description: 'Clear this report from the device.',
       area: '',
-      uid: 'user-a',
     );
 
-    expect(result.cloudSaved, isFalse);
-    expect(result.issue, ReportSaveIssue.cloudNotConfigured);
-    expect(result.report.reference, startsWith('LOCAL-'));
-
-    final local = await reportService.loadLocalReports(uid: 'user-a');
-    expect(local, hasLength(1));
+    expect(await reports.clearAll(), isTrue);
+    expect(await reports.loadHistory(), isEmpty);
+    expect(await reports.isDuplicate('other', 'Clear this report'), isFalse);
   });
 
-  test('legacy local reports migrate to the device-only store', () async {
+  test('legacy report payload migrates into the current store', () async {
     final legacy = [
       {
         'id': 'local_1',
@@ -99,15 +118,16 @@ void main() {
         'createdAt': '2026-01-01T10:00:00.000',
       },
     ];
-    SharedPreferences.setMockInitialValues({
+    final reports = await service({
       'healthmate_reports_v1': jsonEncode(legacy),
     });
-    final prefs = await SharedPreferences.getInstance();
-    final reportService = ReportService(prefs: prefs);
 
-    final reports = await reportService.loadLocalReports(uid: null);
-    expect(reports, hasLength(1));
-    expect(reports.single.id, 'local_1');
+    final history = await reports.loadHistory();
+    expect(history, hasLength(1));
+    expect(history.single.id, 'local_1');
+    expect(history.single.status, ReportStatus.saved);
+
+    final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('healthmate_reports_v1'), isNull);
   });
 }

@@ -7,7 +7,10 @@ import 'app/theme.dart';
 import 'language_provider.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/app_bootstrap.dart';
+import 'services/app_lock_provider.dart';
 import 'services/app_settings_provider.dart';
+import 'services/appointment_provider.dart';
+import 'services/appointment_repository.dart';
 import 'services/profile_provider.dart';
 import 'services/profile_repository.dart';
 
@@ -22,6 +25,8 @@ Future<void> main() async {
   await settingsProvider.load();
 
   final profileProvider = ProfileProvider(ProfileRepository());
+  final appointmentProvider = AppointmentProvider(AppointmentRepository());
+  final appLockProvider = AppLockProvider();
 
   runApp(
     MultiProvider(
@@ -29,6 +34,8 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: languageProvider),
         ChangeNotifierProvider.value(value: settingsProvider),
         ChangeNotifierProvider.value(value: profileProvider),
+        ChangeNotifierProvider.value(value: appointmentProvider),
+        ChangeNotifierProvider.value(value: appLockProvider),
       ],
       child: const HealthmateApp(),
     ),

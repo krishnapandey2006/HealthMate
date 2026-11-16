@@ -31,7 +31,8 @@ class NewsResult {
 }
 
 class NewsService {
-  static const _boxName = 'news_cache_v3';
+  static const _boxName = 'news_cache_v4';
+  static const cacheTtl = Duration(minutes: 30);
   final ApiClient _api;
 
   NewsService({ApiClient? api}) : _api = api ?? ApiClient();
@@ -48,7 +49,10 @@ class NewsService {
   }) async {
     final cached = await loadCachedPage(category: category, lang: lang, page: page);
 
-    if (!forceRefresh && cached != null) {
+    // A cache entry is a short-lived convenience, not a substitute for live
+    // news. Only return it directly while it is fresh; otherwise refresh and
+    // keep the saved copy as an explicit offline fallback.
+    if (!forceRefresh && cached != null && _isFresh(cached)) {
       return cached;
     }
 
@@ -78,11 +82,12 @@ class NewsService {
       }
 
       final result = NewsResult(
-        articles: articles,
+        articles: _prepareArticles(articles),
         page: _asInt(json['page'], page),
         hasMore: json['hasMore'] == true,
         total: _asInt(json['total'], articles.length),
-        lastUpdated: DateTime.tryParse(json['lastUpdated']?.toString() ?? ''),
+        lastUpdated: DateTime.tryParse(json['lastUpdated']?.toString() ?? '') ??
+            DateTime.now(),
         warning: json['warning']?.toString(),
       );
 
@@ -99,7 +104,7 @@ class NewsService {
           total: cached.total,
           lastUpdated: cached.lastUpdated,
           fromCache: true,
-          warning: _warningFor(error),
+          warning: _warningFor(error, cached.lastUpdated),
           error: error,
         );
       }
@@ -112,17 +117,29 @@ class NewsService {
     }
   }
 
-  String _warningFor(ApiException error) {
+  bool _isFresh(NewsResult cached) {
+    final savedAt = cached.lastUpdated;
+    if (savedAt == null) return false;
+    return DateTime.now().difference(savedAt) < cacheTtl;
+  }
+
+  String _warningFor(ApiException error, DateTime? savedAt) {
+    final saved = savedAt == null
+        ? 'Showing saved articles instead.'
+        : 'Showing articles saved on ${savedAt.day.toString().padLeft(2, '0')}/'
+            '${savedAt.month.toString().padLeft(2, '0')}/${savedAt.year} '
+            'at ${savedAt.hour.toString().padLeft(2, '0')}:'
+            '${savedAt.minute.toString().padLeft(2, '0')}.';
     switch (error.type) {
       case ApiErrorType.notConfigured:
-        return 'Live news is not configured. Showing the last saved articles.';
+        return 'Live news is not configured. $saved';
       case ApiErrorType.network:
       case ApiErrorType.timeout:
-        return 'You appear to be offline. Showing the last saved articles.';
+        return 'You appear to be offline. $saved';
       case ApiErrorType.rateLimit:
-        return 'The news service is busy. Showing the last saved articles.';
+        return 'The news service is busy. $saved';
       default:
-        return 'Live news could not be refreshed. Showing the last saved articles.';
+        return 'Live news could not be refreshed. $saved';
     }
   }
 
@@ -147,12 +164,14 @@ class NewsService {
           }
         }
       }
+      final savedAt = DateTime.tryParse(json['savedAt']?.toString() ?? '') ??
+          DateTime.tryParse(json['lastUpdated']?.toString() ?? '');
       return NewsResult(
-        articles: articles,
+        articles: _prepareArticles(articles),
         page: _asInt(json['page'], page),
         hasMore: json['hasMore'] == true,
         total: _asInt(json['total'], articles.length),
-        lastUpdated: DateTime.tryParse(json['lastUpdated']?.toString() ?? ''),
+        lastUpdated: savedAt,
         fromCache: true,
       );
     } catch (_) {
@@ -171,6 +190,7 @@ class NewsService {
           'hasMore': result.hasMore,
           'total': result.total,
           'lastUpdated': (result.lastUpdated ?? DateTime.now()).toIso8601String(),
+          'savedAt': DateTime.now().toIso8601String(),
         }),
       );
     } catch (_) {
@@ -183,11 +203,24 @@ class NewsService {
     return cached?.lastUpdated;
   }
 
-  Future<void> clearCache() async {
+  Future<bool> clearCache() async {
     try {
       final box = await Hive.openBox(_boxName);
       await box.clear();
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  List<Article> _prepareArticles(Iterable<Article> articles) {
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    final list = articles
+        .where((article) =>
+            article.isValid && !article.publishedDate.isAfter(tomorrow))
+        .toList();
+    list.sort((a, b) => b.publishedDate.compareTo(a.publishedDate));
+    return list;
   }
 
   int _asInt(dynamic value, int fallback) {

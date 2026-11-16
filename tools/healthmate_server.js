@@ -30,6 +30,11 @@ const CAMPAIGNS_FILE = path.join(__dirname, '..', 'assets', 'campaigns.json');
 const USER_AGENT = 'HealthMate/1.0 (local development; healthcare information app)';
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_REVERSE_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
+// Headlines without a real publication date are dropped rather than stamped
+// with the current time. Older search hits are also excluded so the app never
+// presents stale articles as today's news.
+const MAX_NEWS_AGE_DAYS = 60;
 
 const cache = new Map();
 const rateBuckets = new Map();
@@ -208,8 +213,12 @@ function safeUrl(value) {
 
 function parseDate(value) {
   const text = nodeText(value);
-  const date = text ? new Date(text) : null;
-  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : new Date().toISOString();
+  if (!text) return null;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  // Guard against malformed feeds that return dates far in the future.
+  if (date.getTime() > Date.now() + 24 * 60 * 60 * 1000) return null;
+  return date.toISOString();
 }
 
 function extractImage(item) {
@@ -388,11 +397,16 @@ async function handleNews(url, res) {
     const xml = await fetchText(upstream.toString(), 20_000);
     let all = parseGoogleNews(xml, category, lang);
     const seen = new Set();
-    all = all.filter((article) => {
-      if (seen.has(article.id)) return false;
-      seen.add(article.id);
-      return true;
-    });
+    const oldestAllowed = Date.now() - MAX_NEWS_AGE_DAYS * 24 * 60 * 60 * 1000;
+    all = all
+      .filter((article) => {
+        if (!article.publishedAt) return false;
+        if (new Date(article.publishedAt).getTime() < oldestAllowed) return false;
+        if (seen.has(article.id)) return false;
+        seen.add(article.id);
+        return true;
+      })
+      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     const start = (page - 1) * limit;
     const pageArticles = await enrichImages(all.slice(start, start + limit));
     const payload = {
@@ -449,6 +463,60 @@ function handleCampaigns(res) {
 }
 
 async function handleGeocode(url, res) {
+  const reverse = url.searchParams.get('reverse') === '1';
+  if (reverse) {
+    const latitude = Number(url.searchParams.get('lat'));
+    const longitude = Number(url.searchParams.get('lon'));
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      return sendError(res, 400, 'Valid coordinates are required for reverse lookup.', 'invalid_request');
+    }
+    const cacheKey = `reverse:${latitude.toFixed(3)}:${longitude.toFixed(3)}`;
+    const cached = getCache(cacheKey);
+    if (cached) return sendJson(res, 200, cached);
+
+    const upstream = new URL(NOMINATIM_REVERSE_ENDPOINT);
+    upstream.searchParams.set('format', 'jsonv2');
+    upstream.searchParams.set('lat', String(latitude));
+    upstream.searchParams.set('lon', String(longitude));
+    upstream.searchParams.set('zoom', '10');
+    upstream.searchParams.set('addressdetails', '1');
+    try {
+      const response = await fetch(upstream, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/json',
+          'Accept-Language': 'en',
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!response.ok) {
+        return sendError(res, 502, 'The location name service is unavailable.', 'geocode_unavailable');
+      }
+      const place = await response.json();
+      const address = place && typeof place.address === 'object' ? place.address : {};
+      const payload = {
+        result: {
+          display_name: cleanText(place.display_name, 300),
+          name: cleanText(place.name || place.display_name, 200),
+          lat: Number(place.lat || latitude),
+          lon: Number(place.lon || longitude),
+          address,
+          state: cleanText(address.state, 120),
+          city: cleanText(address.city || address.town || address.village || address.county, 120),
+          postcode: cleanText(address.postcode, 20),
+        },
+        source: 'OpenStreetMap Nominatim',
+        lastUpdated: new Date().toISOString(),
+      };
+      setCache(cacheKey, payload, GEOCODE_TTL);
+      return sendJson(res, 200, payload);
+    } catch (_) {
+      return sendError(res, 502, 'The location name service could not be reached.', 'geocode_unavailable');
+    }
+  }
+
   const query = cleanText(url.searchParams.get('q'), 120);
   const limit = Math.max(1, Math.min(10, Number(url.searchParams.get('limit') || 5) || 5));
   if (query.length < 2) {

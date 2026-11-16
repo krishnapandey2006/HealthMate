@@ -10,9 +10,19 @@ class UserProfile {
   final DateTime? dateOfBirth;
   final String gender;
   final String state;
+  final String city;
   final String languageCode;
   final bool needsAssistance;
   final bool voiceGuidance;
+
+  /// Optional emergency and health details. Every field is guarded so an older
+  /// saved profile without these keys still loads unchanged.
+  final String bloodGroup;
+  final String allergies;
+  final String conditions;
+  final String emergencyContactName;
+  final String emergencyContactPhone;
+
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -24,9 +34,15 @@ class UserProfile {
     this.dateOfBirth,
     this.gender = 'female',
     this.state = '',
+    this.city = '',
     this.languageCode = 'en',
     this.needsAssistance = false,
     this.voiceGuidance = true,
+    this.bloodGroup = '',
+    this.allergies = '',
+    this.conditions = '',
+    this.emergencyContactName = '',
+    this.emergencyContactPhone = '',
     this.createdAt,
     this.updatedAt,
   });
@@ -83,9 +99,15 @@ class UserProfile {
     bool clearDateOfBirth = false,
     String? gender,
     String? state,
+    String? city,
     String? languageCode,
     bool? needsAssistance,
     bool? voiceGuidance,
+    String? bloodGroup,
+    String? allergies,
+    String? conditions,
+    String? emergencyContactName,
+    String? emergencyContactPhone,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -97,9 +119,15 @@ class UserProfile {
       dateOfBirth: clearDateOfBirth ? null : (dateOfBirth ?? this.dateOfBirth),
       gender: gender ?? this.gender,
       state: state ?? this.state,
+      city: city ?? this.city,
       languageCode: languageCode ?? this.languageCode,
       needsAssistance: needsAssistance ?? this.needsAssistance,
       voiceGuidance: voiceGuidance ?? this.voiceGuidance,
+      bloodGroup: bloodGroup ?? this.bloodGroup,
+      allergies: allergies ?? this.allergies,
+      conditions: conditions ?? this.conditions,
+      emergencyContactName: emergencyContactName ?? this.emergencyContactName,
+      emergencyContactPhone: emergencyContactPhone ?? this.emergencyContactPhone,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -113,9 +141,15 @@ class UserProfile {
         'dateOfBirth': dateOfBirth?.toIso8601String(),
         'gender': gender,
         'state': state,
+        'city': city,
         'languageCode': languageCode,
         'needsAssistance': needsAssistance,
         'voiceGuidance': voiceGuidance,
+        'bloodGroup': bloodGroup,
+        'allergies': allergies,
+        'conditions': conditions,
+        'emergencyContactName': emergencyContactName,
+        'emergencyContactPhone': emergencyContactPhone,
         'createdAt': createdAt?.toIso8601String(),
         'updatedAt': updatedAt?.toIso8601String(),
       };
@@ -151,12 +185,22 @@ class UserProfile {
           parseDate(map['dateOfBirth'] ?? map['user_dob'] ?? map['dob']),
       gender: (map['gender'] ?? map['user_gender'] ?? 'female').toString(),
       state: (map['state'] ?? map['user_state'] ?? '').toString(),
+      city: (map['city'] ?? map['user_city'] ?? '').toString(),
       languageCode:
           (map['languageCode'] ?? map['language_code'] ?? 'en').toString(),
       needsAssistance:
           map['needsAssistance'] == true || map['needs_assistance'] == true,
       voiceGuidance:
           map['voiceGuidance'] != false && map['allow_critical_alerts'] != false,
+      bloodGroup: (map['bloodGroup'] ?? map['blood_group'] ?? '').toString(),
+      allergies: (map['allergies'] ?? '').toString(),
+      conditions: (map['conditions'] ?? map['medical_conditions'] ?? '').toString(),
+      emergencyContactName:
+          (map['emergencyContactName'] ?? map['emergency_contact_name'] ?? '')
+              .toString(),
+      emergencyContactPhone:
+          (map['emergencyContactPhone'] ?? map['emergency_contact_phone'] ?? '')
+              .toString(),
       createdAt: parseDate(map['createdAt'] ?? map['created_at']),
       updatedAt: parseDate(map['updatedAt'] ?? map['updated_at']),
     );
