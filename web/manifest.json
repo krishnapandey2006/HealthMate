@@ -4,7 +4,7 @@
     "start_url": ".",
     "display": "standalone",
     "background_color": "#F5FAF7",
-    "theme_color": "#0E8C7F",
+    "theme_color": "#26A570",
     "description": "Private, local-first health companion with an on-device profile, visit planner, nearby care map and recent public-health news.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,

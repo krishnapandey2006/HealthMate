@@ -5,9 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/theme.dart';
 import '../l10n/app_localizations.dart';
 
-/// The HealthMate mark is drawn in code so it stays crisp at every size and
-/// does not depend on a stale raster asset. The medical cross sits on the brand
-/// green with a quiet ECG line through it.
+/// The compact HealthMate symbol from the official logo artwork. The source
+/// crop keeps the original pixels (medical cross, orbital rings and dots) so
+/// the mark stays sharp and identical to the uploaded brand asset.
 class AppMark extends StatelessWidget {
   final double size;
   final bool withShadow;
@@ -16,57 +16,36 @@ class AppMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(size * 0.28),
-        boxShadow: withShadow ? AppShadows.brand : null,
+      child: Image.asset(
+        'assets/logo_mark.png',
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        semanticLabel: 'HealthMate',
       ),
-      child: CustomPaint(painter: _AppMarkPainter()),
     );
   }
 }
 
-class _AppMarkPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final crossPaint = Paint()
-      ..color = Colors.white
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.width * 0.15;
-    final arm = size.width * 0.25;
-    canvas.drawLine(
-      Offset(center.dx - arm, center.dy),
-      Offset(center.dx + arm, center.dy),
-      crossPaint,
-    );
-    canvas.drawLine(
-      Offset(center.dx, center.dy - arm),
-      Offset(center.dx, center.dy + arm),
-      crossPaint,
-    );
+/// The complete official logo lockup (symbol, HEALTHMATE and MIRA BHAYANDAR).
+/// Used where the full brand can be shown without cropping or distortion.
+class AppBrandLockup extends StatelessWidget {
+  final double width;
 
-    final pulse = Paint()
-      ..color = AppColors.teal
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * 0.062
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final path = Path()
-      ..moveTo(size.width * 0.18, center.dy)
-      ..lineTo(size.width * 0.34, center.dy)
-      ..lineTo(size.width * 0.42, center.dy - size.height * 0.12)
-      ..lineTo(size.width * 0.52, center.dy + size.height * 0.12)
-      ..lineTo(size.width * 0.60, center.dy)
-      ..lineTo(size.width * 0.82, center.dy);
-    canvas.drawPath(path, pulse);
+  const AppBrandLockup({super.key, required this.width});
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      'assets/logo.png',
+      width: width,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      semanticLabel: 'HealthMate — Mira Bhayandar',
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class AppLogo extends StatelessWidget {
@@ -97,7 +76,7 @@ class AppLogo extends StatelessWidget {
                 fontWeight: FontWeight.w800,
                 fontSize: size > 40 ? 22 : 19,
                 letterSpacing: -0.7,
-                color: AppColors.navy,
+                color: AppColors.teal,
               ),
         ),
       ],

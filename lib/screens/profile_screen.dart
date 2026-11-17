@@ -554,7 +554,7 @@ class _ProfileHero extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
       decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
+        color: AppColors.teal,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: AppShadows.brand,
       ),

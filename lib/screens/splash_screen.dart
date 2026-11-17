@@ -19,16 +19,8 @@ class SplashScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const AppLogo(size: 96),
-                const SizedBox(height: 22),
-                Text(
-                  'HealthMate',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.8,
-                      ),
-                ),
-                const SizedBox(height: 8),
+                const AppBrandLockup(width: 230),
+                const SizedBox(height: 18),
                 Text(
                   'Trusted health information, in your language.',
                   textAlign: TextAlign.center,

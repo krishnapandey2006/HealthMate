@@ -69,7 +69,7 @@ class _AppBootstrapState extends State<AppBootstrap> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const AppLogo(size: 64),
+                    const AppBrandLockup(width: 180),
                     const SizedBox(height: 24),
                     Text(
                       l10n.t('startup_error_title'),

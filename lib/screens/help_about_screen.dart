@@ -69,7 +69,7 @@ class HelpAboutScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const AppLogo(size: 54),
+                  const AppBrandLockup(width: 140),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(

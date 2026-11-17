@@ -497,7 +497,7 @@ class _NextVisitCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
+        color: AppColors.teal,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: AppShadows.brand,
       ),

@@ -90,11 +90,7 @@ class _HealthHubScreenState extends State<HealthHubScreen> {
                 Container(
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0A6D63), Color(0xFF0E8C7F)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: AppColors.teal,
                     borderRadius: BorderRadius.circular(AppRadii.xl),
                     boxShadow: AppShadows.brand,
                   ),

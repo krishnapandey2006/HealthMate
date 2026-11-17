@@ -150,9 +150,8 @@ class _AppLockSettingsScreenState extends State<AppLockSettingsScreen> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: lock.enabled
-                      ? AppColors.heroGradient
-                      : AppColors.softGradient,
+                  gradient: lock.enabled ? null : AppColors.softGradient,
+                  color: lock.enabled ? AppColors.teal : null,
                   borderRadius: BorderRadius.circular(AppRadii.xl),
                   border: lock.enabled
                       ? null

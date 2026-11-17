@@ -709,7 +709,7 @@ class _LocationIntro extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
+        color: AppColors.teal,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: AppShadows.brand,
       ),

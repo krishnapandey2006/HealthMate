@@ -87,6 +87,8 @@ flutter:
     - lib/l10n/intl_ta.arb
     - lib/l10n/intl_gu.arb
     - assets/campaigns.json
+    - assets/logo.png
+    - assets/logo_mark.png
 
   fonts:
     - family: PlusJakartaSans

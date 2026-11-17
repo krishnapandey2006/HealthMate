@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  /// Signature HealthMate green. Kept close to the original identity while
-  /// deepening it slightly for better contrast on white.
-  static const teal = Color(0xFF0E8C7F);
-  static const tealDark = Color(0xFF086A60);
-  static const tealDeep = Color(0xFF064B45);
+  /// Signature HealthMate green, sampled directly from the official logo
+  /// artwork (#26A570). The same value is used for every primary brand state so
+  /// the interface never drifts to a different green than the logo.
+  static const brandGreen = Color(0xFF26A570);
+  static const teal = brandGreen;
+  static const tealDark = brandGreen;
+  static const tealDeep = brandGreen;
   static const tealSoft = Color(0xFFE8F6F1);
   static const mint = Color(0xFFDDF3EC);
   static const mintBackground = Color(0xFFF5FAF7);
@@ -35,12 +37,6 @@ class AppColors {
   static const successSoft = Color(0xFFE8F5EE);
   static const info = Color(0xFF2563A8);
   static const infoSoft = Color(0xFFEDF4FC);
-
-  static const heroGradient = LinearGradient(
-    colors: [Color(0xFF08766B), Color(0xFF11A391)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  );
 
   static const softGradient = LinearGradient(
     colors: [Color(0xFFF0FAF6), Color(0xFFE4F4EE)],
@@ -97,7 +93,7 @@ class AppShadows {
 
   static const brand = [
     BoxShadow(
-      color: Color(0x2E0E8C7F),
+      color: Color(0x2E26A570),
       blurRadius: 24,
       offset: Offset(0, 10),
     ),
@@ -138,7 +134,7 @@ class AppTheme {
       scrim: Color(0x660D2733),
       inverseSurface: AppColors.navy,
       onInverseSurface: Colors.white,
-      inversePrimary: Color(0xFF6ED8C9),
+      inversePrimary: AppColors.brandGreen,
     );
 
     final baseText = ThemeData.light().textTheme.apply(
@@ -284,7 +280,7 @@ class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           backgroundColor: AppColors.teal,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF0E8C7F).withValues(alpha: 0.32),
+          disabledBackgroundColor: AppColors.teal.withValues(alpha: 0.32),
           disabledForegroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.md),
@@ -454,7 +450,7 @@ class AppTheme {
         activeTrackColor: AppColors.teal,
         inactiveTrackColor: AppColors.border,
         thumbColor: AppColors.tealDark,
-        overlayColor: Color(0x1A0E8C7F),
+        overlayColor: Color(0x1A26A570),
       ),
     );
   }

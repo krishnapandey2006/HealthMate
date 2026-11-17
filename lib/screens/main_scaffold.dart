@@ -103,7 +103,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                 minWidth: 86,
                 leading: const Padding(
                   padding: EdgeInsets.only(top: 18, bottom: 28),
-                  child: AppLogo(size: 40),
+                  child: AppMark(size: 40),
                 ),
                 trailing: Padding(
                   padding: const EdgeInsets.only(bottom: 18),
