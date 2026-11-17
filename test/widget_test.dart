@@ -11,6 +11,7 @@ import 'package:healthmate_mb/services/appointment_provider.dart';
 import 'package:healthmate_mb/services/appointment_repository.dart';
 import 'package:healthmate_mb/services/profile_provider.dart';
 import 'package:healthmate_mb/services/profile_repository.dart';
+import 'package:healthmate_mb/widgets/chatbot_launcher.dart';
 import 'package:hive/hive.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -119,7 +120,44 @@ void main() {
     expect(find.text('Continue'), findsNothing);
   });
 
-  testWidgets('an enabled app lock is shown before the profile', (tester) async {
+  testWidgets('chatbot launcher clears the mobile bottom navigation',
+      (tester) async {
+    await pumpApp(tester);
+
+    await tester.tap(find.text('Skip'));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    final launcher = find.byType(ChatbotLauncher);
+    expect(launcher, findsOneWidget);
+    final rect = tester.getRect(launcher);
+    expect(rect.width, 56);
+    expect(rect.height, 56);
+    expect(390 - rect.right, 16);
+    // 72px navigation bar plus a 16px gap.
+    expect(844 - rect.bottom, 88);
+  });
+
+  testWidgets('chatbot launcher uses the bottom-right on wide layouts',
+      (tester) async {
+    await pumpApp(tester);
+    tester.view.physicalSize = const Size(1000, 800);
+    await tester.pump();
+
+    await tester.tap(find.text('Skip'));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.byType(NavigationRail), findsOneWidget);
+    final rect = tester.getRect(find.byType(ChatbotLauncher));
+    expect(1000 - rect.right, 16);
+    expect(800 - rect.bottom, 16);
+  });
+
+  testWidgets('an enabled app lock is shown before the profile',
+      (tester) async {
     await pumpApp(tester, initialValues: {
       'healthmate_app_lock_enabled': true,
       'healthmate_app_lock_hash': 'stored-hash',
