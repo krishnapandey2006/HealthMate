@@ -32,18 +32,22 @@ class CampaignService {
     if (!forceRefresh && _cache != null) return _cache!;
 
     try {
-      final json = await _api.getJson('/api/campaigns', timeout: const Duration(seconds: 8));
+      final json = await _api.getJson('/api/campaigns',
+          timeout: const Duration(seconds: 8));
       final rawCampaigns = json['campaigns'];
       if (rawCampaigns is List && rawCampaigns.isNotEmpty) {
         final campaigns = rawCampaigns
             .whereType<Map>()
-            .map((item) => HealthCampaign.fromMap(Map<String, dynamic>.from(item)))
+            .map((item) =>
+                HealthCampaign.fromMap(Map<String, dynamic>.from(item)))
             .where((campaign) => campaign.title.isNotEmpty)
             .toList();
         if (campaigns.isNotEmpty) {
           final result = CampaignLoadResult(
             campaigns: campaigns,
-            lastUpdated: DateTime.tryParse(json['lastUpdated']?.toString() ?? '') ?? DateTime.now(),
+            lastUpdated:
+                DateTime.tryParse(json['lastUpdated']?.toString() ?? '') ??
+                    DateTime.now(),
             source: json['source']?.toString() ?? 'HealthMate verified dataset',
             warning: json['warning']?.toString(),
           );
@@ -116,13 +120,17 @@ class CampaignService {
       if (rawCampaigns is! List) return null;
       final campaigns = rawCampaigns
           .whereType<Map>()
-          .map((item) => HealthCampaign.fromMap(Map<String, dynamic>.from(item)))
+          .map(
+              (item) => HealthCampaign.fromMap(Map<String, dynamic>.from(item)))
           .where((campaign) => campaign.title.isNotEmpty)
           .toList();
       return CampaignLoadResult(
         campaigns: campaigns,
-        lastUpdated: DateTime.tryParse(root['lastReviewed']?.toString() ?? '') ?? DateTime.now(),
-        source: root['sourceNote']?.toString() ?? 'Verified public-health observance calendar',
+        lastUpdated:
+            DateTime.tryParse(root['lastReviewed']?.toString() ?? '') ??
+                DateTime.now(),
+        source: root['sourceNote']?.toString() ??
+            'Verified public-health observance calendar',
       );
     } catch (_) {
       return null;
@@ -135,7 +143,8 @@ class CampaignService {
       if (cityQuery != null && cityQuery.trim().isNotEmpty) {
         final query = cityQuery.toLowerCase();
         final haystack =
-            '${campaign.city} ${campaign.venue} ${campaign.title} ${campaign.organizer}'.toLowerCase();
+            '${campaign.city} ${campaign.venue} ${campaign.title} ${campaign.organizer}'
+                .toLowerCase();
         if (!haystack.contains(query)) continue;
       }
       final occurrence = campaign.occurrence(now);
@@ -158,7 +167,8 @@ class CampaignService {
       if (cityQuery != null && cityQuery.trim().isNotEmpty) {
         final query = cityQuery.toLowerCase();
         final haystack =
-            '${campaign.city} ${campaign.venue} ${campaign.title} ${campaign.organizer}'.toLowerCase();
+            '${campaign.city} ${campaign.venue} ${campaign.title} ${campaign.organizer}'
+                .toLowerCase();
         if (!haystack.contains(query)) continue;
       }
       final occurrence = campaign.previousOccurrence(now);
@@ -172,4 +182,6 @@ class CampaignService {
     result.sort((a, b) => b.start.compareTo(a.start));
     return result;
   }
+
+  void dispose() => _api.close();
 }

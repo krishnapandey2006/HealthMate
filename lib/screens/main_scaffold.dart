@@ -26,6 +26,11 @@ class _MainScaffoldState extends State<MainScaffold> {
   bool _chatMounted = false;
   bool _chatOpen = false;
 
+  // Tabs are built on first visit and kept alive afterwards. Constructing all
+  // five at startup duplicated network work (Home and News both fetched news)
+  // and loaded local repositories that might never be opened.
+  final Set<int> _mountedTabs = {0};
+
   static const _pages = <Widget>[
     HomeScreen(),
     AppointmentsScreen(),
@@ -33,6 +38,20 @@ class _MainScaffoldState extends State<MainScaffold> {
     HealthNewsScreen(),
     ProfileScreen(),
   ];
+
+  void _selectTab(int value) {
+    if (value < 0 || value >= _pages.length) return;
+    setState(() {
+      _mountedTabs.add(value);
+      _index = value;
+    });
+  }
+
+  List<Widget> get _tabChildren => List<Widget>.generate(
+        _pages.length,
+        (i) => _mountedTabs.contains(i) ? _pages[i] : const SizedBox.shrink(),
+        growable: false,
+      );
 
   @override
   void initState() {
@@ -94,8 +113,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               ),
               child: NavigationRail(
                 selectedIndex: _index,
-                onDestinationSelected: (value) =>
-                    setState(() => _index = value),
+                onDestinationSelected: _selectTab,
                 labelType: NavigationRailLabelType.all,
                 backgroundColor: Colors.white,
                 indicatorColor: AppColors.tealSoft,
@@ -126,8 +144,8 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
             Expanded(
               child: MainTabScope(
-                selectTab: (value) => setState(() => _index = value),
-                child: IndexedStack(index: _index, children: _pages),
+                selectTab: _selectTab,
+                child: IndexedStack(index: _index, children: _tabChildren),
               ),
             ),
           ],
@@ -136,20 +154,14 @@ class _MainScaffoldState extends State<MainScaffold> {
     } else {
       shell = Scaffold(
         body: MainTabScope(
-          selectTab: (value) => setState(() => _index = value),
-          child: IndexedStack(index: _index, children: _pages),
+          selectTab: _selectTab,
+          child: IndexedStack(index: _index, children: _tabChildren),
         ),
-        bottomNavigationBar: NavigationBar(
+        bottomNavigationBar: _HealthMateNavigationBar(
+          key: const Key('main-bottom-navigation'),
           selectedIndex: _index,
-          onDestinationSelected: (value) => setState(() => _index = value),
-          destinations: [
-            for (final destination in destinations)
-              NavigationDestination(
-                icon: Icon(destination.icon),
-                selectedIcon: Icon(destination.selectedIcon),
-                label: destination.label,
-              ),
-          ],
+          onSelected: _selectTab,
+          destinations: destinations,
         ),
       );
     }
@@ -190,6 +202,124 @@ class _Destination {
   final String label;
 
   const _Destination(this.icon, this.selectedIcon, this.label);
+}
+
+/// A Material-3-style bottom bar with labels that are guaranteed to render on
+/// one line. Flutter's stock NavigationBar wraps long labels such as
+/// "Appointments" at 320-360 dp widths; FittedBox scales only when a label is
+/// genuinely wider than the space it can borrow from short neighbouring labels.
+class _HealthMateNavigationBar extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final List<_Destination> destinations;
+
+  const _HealthMateNavigationBar({
+    super.key,
+    required this.selectedIndex,
+    required this.onSelected,
+    required this.destinations,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return Material(
+      color: Colors.white,
+      child: SizedBox(
+        height: 72 + bottomInset,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final slot = constraints.maxWidth / destinations.length;
+              final labelWidth = (slot + 28).clamp(slot, 112.0).toDouble();
+              return Row(
+                children: [
+                  for (var i = 0; i < destinations.length; i++)
+                    Expanded(
+                      child: _HealthMateNavItem(
+                        destination: destinations[i],
+                        selected: i == selectedIndex,
+                        labelWidth: labelWidth,
+                        onTap: () => onSelected(i),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HealthMateNavItem extends StatelessWidget {
+  final _Destination destination;
+  final bool selected;
+  final double labelWidth;
+  final VoidCallback onTap;
+
+  const _HealthMateNavItem({
+    required this.destination,
+    required this.selected,
+    required this.labelWidth,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.tealDark : AppColors.muted;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: destination.label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: AppMotion.fast,
+              curve: Curves.easeOut,
+              width: 56,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? AppColors.tealSoft : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Icon(
+                selected ? destination.selectedIcon : destination.icon,
+                size: 22,
+                color: selected ? AppColors.teal : AppColors.muted,
+              ),
+            ),
+            const SizedBox(height: 3),
+            SizedBox(
+              width: labelWidth,
+              height: 15,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  destination.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.1,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: color,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Lets dashboard cards switch the main tab without pushing a duplicate screen.

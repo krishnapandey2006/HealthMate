@@ -36,6 +36,67 @@ const NOMINATIM_REVERSE_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse'
 // presents stale articles as today's news.
 const MAX_NEWS_AGE_DAYS = 60;
 
+const NEWS_FEEDS = {
+  indian: [
+    {
+      url: 'https://www.thehindu.com/sci-tech/health/feeder/default.rss',
+      source: 'The Hindu',
+      category: 'healthcare',
+    },
+    {
+      url: 'https://timesofindia.indiatimes.com/rssfeeds/3908999.cms',
+      source: 'Times of India',
+      category: 'healthcare',
+    },
+  ],
+  research: [
+    {
+      url: 'https://medicalxpress.com/rss-feed/',
+      source: 'Medical Xpress',
+      category: 'research',
+    },
+    {
+      url: 'https://www.sciencedaily.com/rss/health_medicine.xml',
+      source: 'ScienceDaily',
+      category: 'research',
+    },
+  ],
+  public_health: [
+    {
+      url: 'https://www.who.int/rss-feeds/news-english.xml',
+      source: 'WHO',
+      category: 'public_health',
+    },
+  ],
+};
+
+const newsStale = new Map();
+const newsInFlight = new Map();
+const newsFeedCache = new Map();
+const NEWS_FEED_TTL = Number(process.env.HEALTHMATE_NEWS_FEED_TTL_MS || 10 * 60 * 1000);
+let googleNewsBlockedUntil = 0;
+
+function feedsForCategory(category) {
+  const indian = NEWS_FEEDS.indian;
+  switch (category) {
+    case 'research':
+      return [...NEWS_FEEDS.research];
+    case 'public_health':
+    case 'vaccination':
+      return [...indian, NEWS_FEEDS.public_health[0]];
+    case 'prevention':
+      return [...indian, NEWS_FEEDS.research[1]];
+    case 'healthcare':
+      return [...indian, NEWS_FEEDS.research[0]];
+    default:
+      return [
+        ...indian,
+        NEWS_FEEDS.research[0],
+        NEWS_FEEDS.public_health[0],
+      ];
+  }
+}
+
 const cache = new Map();
 const rateBuckets = new Map();
 const xmlParser = new XMLParser({
@@ -310,40 +371,86 @@ function httpsGetJson(url, timeoutMs = 35_000) {
   });
 }
 
-function parseGoogleNews(xml, category, locale) {
+function normalizeTitle(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim();
+}
+
+function inferCategory(title, summary, fallback) {
+  const text = `${title} ${summary}`.toLowerCase();
+  if (/vaccin|immuni[sz]|booster|\bjab\b/.test(text)) return 'vaccination';
+  // Research and public-health feeds are already authoritative for their
+  // category; only the general Indian health feeds need keyword inference.
+  if (fallback !== 'healthcare') return fallback;
+  if (/\b(trial|study|studies|research|researchers|scientists|journal|lancet|clinical|cohort|genetic|gene)\b/.test(text)) {
+    return 'research';
+  }
+  if (/\b(prevent|prevention|risk|diet|nutrition|exercise|screening|awareness|obesity|smoking)\b/.test(text)) {
+    return 'prevention';
+  }
+  if (/\b(outbreak|surveillance|public health|ministry|government|who|cdc|epidemic|pandemic|measles|malaria|dengue|tuberculosis)\b/.test(text)) {
+    return 'public_health';
+  }
+  if (/\b(hospital|clinic|doctor|nurse|insurance|healthcare|health care|policy|medical|surgery|patient)\b/.test(text)) {
+    return 'healthcare';
+  }
+  return fallback;
+}
+
+/**
+ * Parses an RSS 2.0 or Atom document from any publisher. Undated entries are
+ * dropped: a current timestamp must never be invented for an old article.
+ */
+function parseNewsFeed(xml, feed) {
   const parsed = xmlParser.parse(xml);
   const channel = parsed?.rss?.channel || parsed?.feed;
   const items = asArray(channel?.item || channel?.entry);
+  const feedTitle = cleanText(nodeText(channel?.title), 80);
   const articles = [];
 
   for (const item of items) {
-    const title = cleanText(nodeText(item.title), 220);
+    let title = cleanText(nodeText(item.title), 220);
     const link = safeUrl(nodeText(item.link) || nodeText(item.guid) || nodeText(item.id));
     if (!title || !link) continue;
 
-    const sourceName = cleanText(
-      nodeText(item.source) || nodeText(item.author) || (locale === 'en' ? 'Google News' : 'Google News'),
-      80,
-    );
-    let summary = cleanText(
-      nodeText(item.description) || nodeText(item.summary) || nodeText(item['content:encoded']),
-      320,
-    );
-    if (summary.toLowerCase() === title.toLowerCase()) summary = '';
+    const sourceTag = nodeText(item.source);
+    const sourceName = cleanText(sourceTag || feed.source || feedTitle, 80);
     const titleSuffix = ` - ${sourceName}`;
-    const cleanTitle = title.endsWith(titleSuffix)
-      ? title.slice(0, -titleSuffix.length).trim()
-      : title;
+    if (sourceTag && title.endsWith(titleSuffix)) {
+      title = title.slice(0, -titleSuffix.length).trim();
+    }
+
+    const rawSummary = nodeText(
+      item.description || item.summary || item['content:encoded'] || item.content,
+    );
+    let summary = cleanText(rawSummary, 320);
+    if (
+      summary.toLowerCase() === title.toLowerCase() ||
+      summary.toLowerCase().startsWith(title.toLowerCase())
+    ) {
+      summary = '';
+    }
+
+    const publishedAt = parseDate(item.pubDate || item.published || item.updated || item.date);
+    // Feeds that omit dates are skipped rather than presented as breaking news.
+    if (!publishedAt) continue;
+
+    const category =
+      feed.category === 'all'
+        ? inferCategory(title, summary, 'healthcare')
+        : feed.category || inferCategory(title, summary, 'healthcare');
 
     articles.push({
       id: cleanText(nodeText(item.guid) || nodeText(item.id) || link, 220),
-      title: cleanTitle,
-      source: sourceName,
-      publishedAt: parseDate(item.pubDate || item.published || item.updated),
+      title,
+      source: sourceName || feed.source || 'Health news',
+      publishedAt,
       summary,
-      severity: /outbreak|alert|emergency|recall/i.test(cleanTitle) ? 'CRITICAL' : 'ADVISORY',
+      severity: /outbreak|alert|emergency|recall/i.test(title) ? 'CRITICAL' : 'ADVISORY',
       link,
-      language: locale,
+      language: feed.language || 'en',
       thumbnail: extractImage(item),
       category,
     });
@@ -351,12 +458,216 @@ function parseGoogleNews(xml, category, locale) {
   return articles;
 }
 
+function prepareNews(articles) {
+  const oldestAllowed = Date.now() - MAX_NEWS_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const newestAllowed = Date.now() + 24 * 60 * 60 * 1000;
+  const seenTitles = new Set();
+  const seenLinks = new Set();
+  const prepared = [];
+
+  for (const article of articles) {
+    if (!article.title || !article.link || !article.publishedAt) continue;
+    const published = Date.parse(article.publishedAt);
+    if (!Number.isFinite(published)) continue;
+    if (published < oldestAllowed || published > newestAllowed) continue;
+
+    const titleKey = normalizeTitle(article.title);
+    if (!titleKey || seenTitles.has(titleKey)) continue;
+    if (seenLinks.has(article.link)) continue;
+
+    seenTitles.add(titleKey);
+    seenLinks.add(article.link);
+    prepared.push(article);
+  }
+  return prepared.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+}
+
+function selectForCategory(prepared, category) {
+  if (category === 'all') return { articles: prepared, warning: undefined };
+  const matching = prepared.filter((article) => article.category === category);
+  // A single lonely item makes the category tab look broken. When fewer than
+  // four genuine matches exist, keep all recent coverage but label the fallback
+  // explicitly; every card keeps its own true category.
+  if (matching.length >= 4) return { articles: matching, warning: undefined };
+  return {
+    articles: prepared,
+    warning: matching.length === 0
+      ? 'No articles specifically matching this category were available right now. Showing recent health coverage instead.'
+      : 'Only a few articles specifically matching this category were available. Showing recent health coverage as well.',
+  };
+}
+
+async function fetchPublisherFeed(feed) {
+  const cached = newsFeedCache.get(feed.url);
+  if (cached && Date.now() - cached.fetchedAt < NEWS_FEED_TTL) return cached.articles;
+
+  const running = newsInFlight.get(feed.url);
+  if (running) return running;
+
+  const promise = (async () => {
+    const xml = await fetchText(feed.url, 12_000);
+    const articles = parseNewsFeed(xml, feed);
+    if (articles.length > 0) {
+      newsFeedCache.set(feed.url, { articles, fetchedAt: Date.now() });
+    }
+    return articles;
+  })();
+
+  newsInFlight.set(feed.url, promise);
+  try {
+    return await promise;
+  } finally {
+    newsInFlight.delete(feed.url);
+  }
+}
+
+async function fetchPublisherArticles(category) {
+  const feeds = feedsForCategory(category);
+  const results = await Promise.allSettled(feeds.map((feed) => fetchPublisherFeed(feed)));
+  const articles = [];
+  let successes = 0;
+  let failures = 0;
+
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      successes += 1;
+      articles.push(...result.value);
+    } else {
+      failures += 1;
+    }
+  }
+  return { articles, successes, failures };
+}
+
+async function fetchGoogleNews(category, lang) {
+  if (Date.now() < googleNewsBlockedUntil) {
+    const error = new Error('Google News is cooling down after rate limiting.');
+    error.status = 429;
+    throw error;
+  }
+
+  const locale = NEWS_LOCALES[lang] || NEWS_LOCALES.en;
+  const query =
+    category === 'all'
+      ? null
+      : (LOCAL_CATEGORY_QUERIES[lang] && LOCAL_CATEGORY_QUERIES[lang][category]) ||
+        CATEGORY_QUERIES[category];
+  const upstream = new URL(
+    query
+      ? 'https://news.google.com/rss/search'
+      : 'https://news.google.com/rss/headlines/section/topic/HEALTH',
+  );
+  if (query) upstream.searchParams.set('q', query);
+  upstream.searchParams.set('hl', locale.hl);
+  upstream.searchParams.set('gl', locale.gl);
+  upstream.searchParams.set('ceid', locale.ceid);
+
+  try {
+    const xml = await fetchText(upstream.toString(), 12_000);
+    return parseNewsFeed(xml, {
+      source: 'Google News',
+      category,
+      language: lang,
+    });
+  } catch (error) {
+    if (error.status === 429) {
+      // Do not hammer a rate-limited source on every request.
+      googleNewsBlockedUntil = Date.now() + 10 * 60 * 1000;
+    }
+    throw error;
+  }
+}
+
+async function collectNewsArticles(category, lang) {
+  const key = `${lang}:${category}`;
+  const running = newsInFlight.get(key);
+  if (running) return running;
+
+  const promise = (async () => {
+    const isEnglish = lang === 'en';
+    let publishers = { articles: [], successes: 0, failures: 0 };
+    if (isEnglish) {
+      publishers = await fetchPublisherArticles(category);
+    }
+
+    // Localized tabs need Google's localized search. English tabs ask Google
+    // only when publisher coverage is thin or absent, so a rate-limited Google
+    // never blocks genuine publisher articles.
+    const needsGoogle =
+      !isEnglish ||
+      publishers.articles.length === 0 ||
+      (category !== 'all' && publishers.articles.length < 6);
+
+    let googleArticles = [];
+    let googleError = null;
+    if (needsGoogle) {
+      try {
+        googleArticles = await fetchGoogleNews(category, lang);
+      } catch (error) {
+        googleError = error;
+      }
+    }
+
+    let combined = [...publishers.articles, ...googleArticles];
+    let warning;
+
+    if (!isEnglish && googleArticles.length === 0) {
+      if (combined.length === 0) {
+        const english = await fetchPublisherArticles('all');
+        publishers.successes += english.successes;
+        publishers.failures += english.failures;
+        combined = [...english.articles];
+      }
+      if (combined.length > 0) {
+        warning =
+          'Live coverage in the selected language is unavailable right now, so English-language health articles are shown.';
+      }
+    }
+
+    let prepared = prepareNews(combined);
+    if (category !== 'all') {
+      const selected = selectForCategory(prepared, category);
+      prepared = selected.articles;
+      if (selected.warning) warning = selected.warning;
+    }
+
+    const nothingAnswered =
+      publishers.successes === 0 && googleArticles.length === 0 && !googleError;
+    if (prepared.length === 0 && publishers.successes === 0 && googleArticles.length === 0) {
+      const error = new Error(
+        nothingAnswered
+          ? 'No live news source returned recent articles.'
+          : 'All live news sources failed.',
+      );
+      error.status = googleError && googleError.status === 429 ? 429 : 502;
+      throw error;
+    }
+
+    const sourceNames = [...new Set(prepared.map((article) => article.source))].filter(Boolean);
+    return {
+      articles: prepared,
+      source: sourceNames.slice(0, 4).join(', ') || 'Publisher RSS feeds',
+      warning:
+        prepared.length === 0
+          ? 'No recent health articles were returned by the live sources.'
+          : warning,
+    };
+  })();
+
+  newsInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    newsInFlight.delete(key);
+  }
+}
+
 async function enrichImages(articles) {
-  const candidates = articles.filter((article) => !article.thumbnail).slice(0, 6);
+  const candidates = articles.filter((article) => !article.thumbnail).slice(0, 3);
   await Promise.allSettled(
     candidates.map(async (article) => {
       try {
-        const html = await fetchText(article.link, 4_500);
+        const html = await fetchText(article.link, 2_500);
         const image = extractMetaImage(html);
         if (image) article.thumbnail = image;
       } catch (_) {
@@ -369,68 +680,68 @@ async function enrichImages(articles) {
 }
 
 async function handleNews(url, res) {
-  const category = CATEGORY_QUERIES[url.searchParams.get('category')] ? url.searchParams.get('category') : 'all';
-  const lang = NEWS_LOCALES[url.searchParams.get('lang')] ? url.searchParams.get('lang') : 'en';
+  const requestedCategory = url.searchParams.get('category');
+  const category = CATEGORY_QUERIES[requestedCategory] ? requestedCategory : 'all';
+  const requestedLang = url.searchParams.get('lang');
+  const lang = NEWS_LOCALES[requestedLang] ? requestedLang : 'en';
   const page = Math.max(1, Math.min(20, Number(url.searchParams.get('page') || 1) || 1));
   const limit = Math.max(1, Math.min(30, Number(url.searchParams.get('limit') || 12) || 12));
-  const locale = NEWS_LOCALES[lang];
-  const query =
-    (LOCAL_CATEGORY_QUERIES[lang] && LOCAL_CATEGORY_QUERIES[lang][category]) ||
-    CATEGORY_QUERIES[category];
 
   const cacheKey = `news:${lang}:${category}:${page}:${limit}`;
   const cached = getCache(cacheKey);
   if (cached) return sendJson(res, 200, cached);
 
-  const isHealthTopic = category === 'all';
-  const upstream = new URL(
-    isHealthTopic
-      ? 'https://news.google.com/rss/headlines/section/topic/HEALTH'
-      : 'https://news.google.com/rss/search',
-  );
-  if (!isHealthTopic) upstream.searchParams.set('q', query);
-  upstream.searchParams.set('hl', locale.hl);
-  upstream.searchParams.set('gl', locale.gl);
-  upstream.searchParams.set('ceid', locale.ceid);
-
   try {
-    const xml = await fetchText(upstream.toString(), 20_000);
-    let all = parseGoogleNews(xml, category, lang);
-    const seen = new Set();
-    const oldestAllowed = Date.now() - MAX_NEWS_AGE_DAYS * 24 * 60 * 60 * 1000;
-    all = all
-      .filter((article) => {
-        if (!article.publishedAt) return false;
-        if (new Date(article.publishedAt).getTime() < oldestAllowed) return false;
-        if (seen.has(article.id)) return false;
-        seen.add(article.id);
-        return true;
-      })
-      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    const collected = await collectNewsArticles(category, lang);
     const start = (page - 1) * limit;
-    const pageArticles = await enrichImages(all.slice(start, start + limit));
+    const pageArticles = await enrichImages(collected.articles.slice(start, start + limit));
     const payload = {
       articles: pageArticles,
       page,
       limit,
-      total: all.length,
-      hasMore: start + limit < all.length,
+      total: collected.articles.length,
+      hasMore: start + limit < collected.articles.length,
       lastUpdated: new Date().toISOString(),
-      source: 'Google News RSS',
+      source: collected.source,
       category,
       language: lang,
-      warning: all.length === 0 ? 'No live articles were returned by the source.' : undefined,
+      warning: collected.warning,
     };
-    if (pageArticles.length > 0) setCache(cacheKey, payload, NEWS_TTL);
+
+    if (pageArticles.length > 0) {
+      setCache(cacheKey, payload, NEWS_TTL);
+      newsStale.set(cacheKey, payload);
+      if (newsStale.size > 60) {
+        const oldest = newsStale.keys().next().value;
+        if (oldest) newsStale.delete(oldest);
+      }
+    }
     return sendJson(res, 200, payload);
   } catch (error) {
+    const stale = newsStale.get(cacheKey);
+    if (stale) {
+      const savedAt = new Date(stale.lastUpdated);
+      const stamp = Number.isNaN(savedAt.getTime())
+        ? 'earlier'
+        : `${savedAt.getDate().toString().padStart(2, '0')}/` +
+          `${(savedAt.getMonth() + 1).toString().padStart(2, '0')}/` +
+          `${savedAt.getFullYear()} at ` +
+          `${savedAt.getHours().toString().padStart(2, '0')}:` +
+          `${savedAt.getMinutes().toString().padStart(2, '0')}`;
+      return sendJson(res, 200, {
+        ...stale,
+        stale: true,
+        warning: `Live news could not be refreshed. Showing articles saved on ${stamp}.`,
+      });
+    }
+
     const status = error.status === 429 ? 429 : 502;
     return sendError(
       res,
       status,
       status === 429
-        ? 'The news source is rate-limiting requests. Try again shortly.'
-        : 'The live news source could not be reached.',
+        ? 'The news sources are rate-limiting requests. Try again shortly.'
+        : 'The live news sources could not be reached.',
       status === 429 ? 'rate_limited' : 'news_unavailable',
     );
   }
@@ -889,7 +1200,7 @@ const server = http.createServer(async (req, res) => {
         version: '1.0.0',
         uptimeSeconds: Math.round(process.uptime()),
         sources: {
-          news: 'Google News RSS',
+          news: 'Publisher RSS feeds and Google News',
           campaigns: 'Bundled WHO/UN verified dataset',
           geocode: 'OpenStreetMap Nominatim',
           facilities: 'OpenStreetMap Overpass API',

@@ -86,10 +86,14 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _newsService.dispose();
     super.dispose();
   }
 
-  Future<void> _load({required bool reset, bool force = false, bool preferCache = false}) async {
+  Future<void> _load(
+      {required bool reset,
+      bool force = false,
+      bool preferCache = false}) async {
     final token = ++_requestToken;
     final l10n = AppLocalizations.of(context);
 
@@ -106,6 +110,7 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
         category: _category,
         lang: _languageCode,
         page: 1,
+        limit: 12,
       );
       if (!mounted || token != _requestToken) return;
       if (cached != null && cached.articles.isNotEmpty) {
@@ -125,7 +130,7 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
       lang: _languageCode,
       page: reset ? 1 : _page + 1,
       limit: 12,
-      forceRefresh: force || reset,
+      forceRefresh: force,
     );
 
     if (!mounted || token != _requestToken) return;
@@ -141,7 +146,8 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
       return;
     }
 
-    final combined = reset ? result.articles : _merge(_articles, result.articles);
+    final combined =
+        reset ? result.articles : _merge(_articles, result.articles);
     setState(() {
       _loading = false;
       _loadingMore = false;
@@ -159,11 +165,17 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
     final seen = <String>{};
     final result = <Article>[];
     for (final article in [...existing, ...incoming]) {
-      final key = article.link ?? '${article.title}|${article.source}';
-      if (seen.add(key)) result.add(article);
+      final key = _normalizeTitle(article.title);
+      if (key.isNotEmpty && seen.add(key)) result.add(article);
     }
+    result.sort((a, b) => b.publishedDate.compareTo(a.publishedDate));
     return result;
   }
+
+  String _normalizeTitle(String title) => title
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9\u0900-\u0DFF]+'), '')
+      .trim();
 
   Future<void> _refresh() => _load(reset: true, force: true);
 
@@ -191,7 +203,7 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
       _error = null;
       _warning = null;
     });
-    _load(reset: true, force: true);
+    _load(reset: true, preferCache: true);
   }
 
   String _categoryLabel(AppLocalizations l10n, String category) {
@@ -264,7 +276,9 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
                       Row(
                         children: [
                           Icon(
-                            _fromCache ? Icons.history_rounded : Icons.check_circle_outline_rounded,
+                            _fromCache
+                                ? Icons.history_rounded
+                                : Icons.check_circle_outline_rounded,
                             size: 13,
                             color: AppColors.muted,
                           ),
@@ -272,7 +286,10 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
                           Expanded(
                             child: Text(
                               '${_fromCache ? l10n.t('saved_articles') : l10n.t('last_updated')} ${formatShortDate(_lastUpdated!, l10n)}',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(fontSize: 11.5),
                             ),
                           ),
                         ],
@@ -328,21 +345,35 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
                   onAction: _refresh,
                 ),
               )
-            else
+            else ...[
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final article = _articles[index];
+                    return ResponsiveBody(
+                      maxWidth: 920,
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        0,
+                        16,
+                        index == _articles.length - 1 ? 0 : 10,
+                      ),
+                      child: _NewsCard(
+                        article: article,
+                        categoryLabel: _categoryLabel(l10n, article.category),
+                        onTap: () => _openArticle(article),
+                      ),
+                    );
+                  },
+                  childCount: _articles.length,
+                ),
+              ),
               SliverToBoxAdapter(
                 child: ResponsiveBody(
                   maxWidth: 920,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   child: Column(
                     children: [
-                      for (var i = 0; i < _articles.length; i++) ...[
-                        _NewsCard(
-                          article: _articles[i],
-                          categoryLabel: _categoryLabel(l10n, _articles[i].category),
-                          onTap: () => _openArticle(_articles[i]),
-                        ),
-                        if (i != _articles.length - 1) const SizedBox(height: 10),
-                      ],
-                      const SizedBox(height: 16),
                       if (_loadingMore)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 12),
@@ -371,6 +402,7 @@ class _HealthNewsScreenState extends State<HealthNewsScreen> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
       ),
@@ -392,6 +424,7 @@ class _NewsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final cacheWidth = (96 * MediaQuery.devicePixelRatioOf(context)).round();
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -412,14 +445,21 @@ class _NewsCard extends StatelessWidget {
                       child: article.thumbnail == null
                           ? Container(
                               color: AppColors.tealSoft,
-                              child: const Icon(Icons.health_and_safety_outlined, color: AppColors.teal, size: 30),
+                              child: const Icon(
+                                  Icons.health_and_safety_outlined,
+                                  color: AppColors.teal,
+                                  size: 30),
                             )
                           : Image.network(
                               article.thumbnail!,
                               fit: BoxFit.cover,
+                              cacheWidth: cacheWidth,
                               errorBuilder: (_, __, ___) => Container(
                                 color: AppColors.tealSoft,
-                                child: const Icon(Icons.health_and_safety_outlined, color: AppColors.teal, size: 30),
+                                child: const Icon(
+                                    Icons.health_and_safety_outlined,
+                                    color: AppColors.teal,
+                                    size: 30),
                               ),
                             ),
                     ),
@@ -445,7 +485,10 @@ class _NewsCard extends StatelessWidget {
                           article.summary,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 12),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(fontSize: 12),
                         ),
                       ],
                     ),
@@ -470,22 +513,30 @@ class _NewsCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     '· ${formatShortDate(article.publishedDate, l10n)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 11),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(fontSize: 11),
                   ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF0F5F3),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
                       categoryLabel,
-                      style: const TextStyle(fontSize: 10, color: AppColors.slate, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                          fontSize: 10,
+                          color: AppColors.slate,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.muted),
+                  const Icon(Icons.open_in_new_rounded,
+                      size: 14, color: AppColors.muted),
                 ],
               ),
             ],

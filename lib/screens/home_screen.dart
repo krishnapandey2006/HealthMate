@@ -62,6 +62,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _newsService.dispose();
+    _campaignService.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadAll() async {
     await Future.wait([_loadNews(), _loadCampaigns()]);
   }
@@ -76,8 +83,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final result = await _newsService.fetchPage(
       category: 'all',
       lang: _languageCode,
+      // Share one 12-article cache entry with the full News tab. The dashboard
+      // only renders three of them, so opening News later is instant instead of
+      // issuing a second overlapping request.
       page: 1,
-      limit: 5,
+      limit: 12,
       forceRefresh: refresh,
     );
     if (!mounted) return;
@@ -137,8 +147,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-                  onPressed: () => _call(sheetContext, settings.emergencyNumber),
+                  style:
+                      FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                  onPressed: () =>
+                      _call(sheetContext, settings.emergencyNumber),
                   icon: const Icon(Icons.call_rounded),
                   label: Text(
                     '${l10n.t('call_emergency')} · ${settings.emergencyNumber}',
@@ -174,7 +186,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 14),
                 Text(
                   l10n.t('emergency_disclaimer'),
-                  style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+                  style: Theme.of(sheetContext)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontSize: 11.5),
                 ),
               ],
             ),
@@ -266,7 +281,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               Text(
                                 '$timeGreeting${firstName.isEmpty ? '' : ', $firstName'}',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
                                       color: AppColors.tealDark,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -289,9 +307,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         Text(
                           formatFriendlyDate(now, includeWeekday: true)
                               .replaceAll(', ${now.year}', ''),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontSize: 11.5,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    fontSize: 11.5,
+                                  ),
                         ),
                       ],
                     ),
@@ -303,14 +322,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           : () {
                               final next = appointmentProvider.nextAppointment;
                               if (next != null) {
-                                _open(AppointmentDetailScreen(appointmentId: next.id));
+                                _open(AppointmentDetailScreen(
+                                    appointmentId: next.id));
                               }
                             },
                       onAdd: () => _selectTab(1),
                     ),
                     const SizedBox(height: 12),
                     _EmergencyStrip(
-                      number: context.watch<AppSettingsProvider>().emergencyNumber,
+                      number:
+                          context.watch<AppSettingsProvider>().emergencyNumber,
                       onTap: _showEmergency,
                     ),
                     const SizedBox(height: 22),
@@ -660,7 +681,8 @@ class _EmergencyStrip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
           child: Row(
             children: [
-              const Icon(Icons.emergency_outlined, color: AppColors.danger, size: 21),
+              const Icon(Icons.emergency_outlined,
+                  color: AppColors.danger, size: 21),
               const SizedBox(width: 11),
               Expanded(
                 child: Column(
@@ -845,6 +867,9 @@ class _NewsPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final featuredWidth = featured ? 100 : 78;
+    final cacheWidth =
+        (featuredWidth * MediaQuery.devicePixelRatioOf(context)).round();
     final thumbnail = article.thumbnail == null
         ? Container(
             color: AppColors.tealSoft,
@@ -856,6 +881,7 @@ class _NewsPreview extends StatelessWidget {
         : Image.network(
             article.thumbnail!,
             fit: BoxFit.cover,
+            cacheWidth: cacheWidth,
             errorBuilder: (_, __, ___) => Container(
               color: AppColors.tealSoft,
               child: const Icon(
@@ -1021,8 +1047,18 @@ class _CampaignPreview extends StatelessWidget {
 
   static String _month(int month) {
     const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
     ];
     return months[(month - 1).clamp(0, 11)];
   }

@@ -45,16 +45,45 @@ class _NearbyScreenState extends State<NearbyScreen> {
   String _filter = 'all';
   String _view = 'map';
   double _radiusKm = 8;
+  int _loadToken = 0;
+  int _areaToken = 0;
+  bool _autoLocateTried = false;
 
   bool get _hasLocation => _latitude != null && _longitude != null;
   LatLng get _center => LatLng(_latitude ?? 0, _longitude ?? 0);
+
+  @override
+  void initState() {
+    super.initState();
+    // If the user already granted location access, show their real nearby
+    // hospitals immediately. If not, the explanation card below requests it
+    // only after an explicit tap.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _autoLocateIfPermitted());
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
     _searchFocus.dispose();
     _mapController.dispose();
+    _facilityService.dispose();
     super.dispose();
+  }
+
+  Future<void> _autoLocateIfPermitted() async {
+    if (_autoLocateTried || !mounted) return;
+    _autoLocateTried = true;
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        _permissionExplained = true;
+        await _useMyLocation();
+      }
+    } catch (_) {
+      // The manual search and the permission card remain available.
+    }
   }
 
   Future<void> _requestLocation() async {
@@ -86,6 +115,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   }
 
   Future<void> _useMyLocation() async {
+    if (_locating) return;
     final l10n = AppLocalizations.of(context);
     setState(() {
       _locating = true;
@@ -128,21 +158,64 @@ class _NearbyScreenState extends State<NearbyScreen> {
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-        ),
-      ).timeout(const Duration(seconds: 20));
-      if (!mounted) return;
-      setState(() {
-        _latitude = position.latitude;
-        _longitude = position.longitude;
-        _locationLabel = l10n.t('current_location');
-        _locating = false;
-      });
-      _centerMap();
-      await _loadFacilities();
-      unawaited(_resolveAreaName(position.latitude, position.longitude));
+      // The last known fix is usually available instantly. Show real nearby
+      // hospitals from it while the precise GPS fix is still being acquired.
+      Position? lastKnown;
+      try {
+        lastKnown = await Geolocator.getLastKnownPosition();
+      } catch (_) {
+        // A precise fix below can still succeed.
+      }
+      if (lastKnown != null && mounted) {
+        setState(() {
+          _latitude = lastKnown!.latitude;
+          _longitude = lastKnown.longitude;
+          _locationLabel = l10n.t('current_location');
+          _error = null;
+        });
+        _centerMap();
+        unawaited(_loadFacilities());
+        unawaited(_resolveAreaName(lastKnown.latitude, lastKnown.longitude));
+      }
+
+      Position? current;
+      try {
+        current = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 15),
+          ),
+        );
+      } on TimeoutException {
+        if (lastKnown == null) rethrow;
+        // Keep the last known fix rather than discarding real results.
+      } catch (_) {
+        if (lastKnown == null) rethrow;
+      }
+
+      if (current != null && mounted) {
+        final moved = lastKnown == null ||
+            Geolocator.distanceBetween(
+                  lastKnown.latitude,
+                  lastKnown.longitude,
+                  current.latitude,
+                  current.longitude,
+                ) >
+                150;
+        if (moved) {
+          setState(() {
+            _latitude = current!.latitude;
+            _longitude = current.longitude;
+            _locationLabel = l10n.t('current_location');
+            _error = null;
+          });
+          _centerMap();
+          await _loadFacilities();
+          unawaited(_resolveAreaName(current.latitude, current.longitude));
+        }
+      }
+
+      if (mounted) setState(() => _locating = false);
     } on TimeoutException {
       if (mounted) {
         setState(() {
@@ -162,12 +235,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   Future<void> _resolveAreaName(double latitude, double longitude) async {
     if (!mounted) return;
+    final token = ++_areaToken;
     setState(() => _resolvingArea = true);
     final place = await _facilityService.reverseGeocode(
       latitude: latitude,
       longitude: longitude,
     );
-    if (!mounted) return;
+    if (!mounted || token != _areaToken) return;
     final label = place == null
         ? ''
         : [place.city, place.state]
@@ -242,8 +316,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () =>
-                              Navigator.of(sheetContext).pop(place),
+                          onTap: () => Navigator.of(sheetContext).pop(place),
                         );
                       },
                     ),
@@ -266,10 +339,15 @@ class _NearbyScreenState extends State<NearbyScreen> {
     await _loadFacilities();
   }
 
-  Future<void> _loadFacilities({double? radiusKm, String? filter}) async {
+  Future<void> _loadFacilities({
+    double? radiusKm,
+    String? filter,
+    bool forceRefresh = false,
+  }) async {
     final lat = _latitude;
     final lon = _longitude;
     if (lat == null || lon == null) return;
+    final token = ++_loadToken;
     setState(() {
       _loading = true;
       _error = null;
@@ -282,8 +360,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
       longitude: lon,
       radiusKm: _radiusKm,
       type: _filter,
+      forceRefresh: forceRefresh,
     );
-    if (!mounted) return;
+    if (!mounted || token != _loadToken) return;
     setState(() {
       _loading = false;
       _facilities = result.facilities;
@@ -419,13 +498,16 @@ class _NearbyScreenState extends State<NearbyScreen> {
           if (_hasLocation)
             IconButton(
               tooltip: l10n.t('refresh'),
-              onPressed: _loading ? null : () => _loadFacilities(),
+              onPressed:
+                  _loading ? null : () => _loadFacilities(forceRefresh: true),
               icon: const Icon(Icons.refresh_rounded),
             ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _hasLocation ? () => _loadFacilities() : () async {},
+        onRefresh: _hasLocation
+            ? () => _loadFacilities(forceRefresh: true)
+            : () async {},
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -556,7 +638,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                           color: AppColors.danger,
                           background: AppColors.dangerSoft,
                           trailing: TextButton(
-                            onPressed: () => _loadFacilities(),
+                            onPressed: () =>
+                                _loadFacilities(forceRefresh: true),
                             child: Text(l10n.t('retry')),
                           ),
                         ),
@@ -602,7 +685,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   child: AppErrorState(
                     title: l10n.t('nearby_unavailable'),
                     message: _error!,
-                    onRetry: () => _loadFacilities(),
+                    onRetry: () => _loadFacilities(forceRefresh: true),
                   ),
                 ),
               )
@@ -620,24 +703,36 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   ),
                 ),
               )
-            else
+            else ...[
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final facility = _facilities[index];
+                    return ResponsiveBody(
+                      maxWidth: 940,
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        0,
+                        16,
+                        index == _facilities.length - 1 ? 0 : 10,
+                      ),
+                      child: _FacilityCard(
+                        facility: facility,
+                        onTap: () => _showFacility(facility),
+                        onCall: () => _call(facility.phone),
+                        onDirections: () => _openDirections(facility),
+                      ),
+                    );
+                  },
+                  childCount: _facilities.length,
+                ),
+              ),
               SliverToBoxAdapter(
                 child: ResponsiveBody(
                   maxWidth: 940,
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   child: Column(
                     children: [
-                      for (var i = 0; i < _facilities.length; i++) ...[
-                        _FacilityCard(
-                          facility: _facilities[i],
-                          onTap: () => _showFacility(_facilities[i]),
-                          onCall: () => _call(_facilities[i].phone),
-                          onDirections: () => _openDirections(_facilities[i]),
-                        ),
-                        if (i != _facilities.length - 1)
-                          const SizedBox(height: 10),
-                      ],
-                      const SizedBox(height: 16),
                       _SourceNote(source: _source),
                       const SizedBox(height: 12),
                       AppInfoBanner(
@@ -656,6 +751,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
       ),
@@ -1107,8 +1203,7 @@ class _RadiusRow extends StatelessWidget {
                           .replaceAll('{km}', _formatRadius(radius)),
                     ),
                     selected: radiusKm == radius,
-                    onSelected:
-                        loading ? null : (_) => onChanged(radius),
+                    onSelected: loading ? null : (_) => onChanged(radius),
                   ),
                   const SizedBox(width: 6),
                 ],
@@ -1156,10 +1251,13 @@ class _ResultsHeader extends StatelessWidget {
               Text(
                 loading
                     ? l10n.t('nearby_refresh_hint')
-                    : l10n.t('nearby_results_count').replaceAll(
+                    : l10n
+                        .t('nearby_results_count')
+                        .replaceAll(
                           '{count}',
                           '$count',
-                        ).replaceAll('{radius}', _formatRadius(radiusKm)),
+                        )
+                        .replaceAll('{radius}', _formatRadius(radiusKm)),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -1307,8 +1405,7 @@ class _MapPanel extends StatelessWidget {
               ),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.healthmate.app',
                   maxZoom: 19,
                 ),
@@ -1528,25 +1625,21 @@ class _FacilityCard extends StatelessWidget {
                           facility.displayName,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                height: 1.25,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.25,
+                                  ),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           facilityTypeLabel(l10n, facility.type),
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: color,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 11.5,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: color,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11.5,
+                                  ),
                         ),
                       ],
                     ),
@@ -1700,8 +1793,7 @@ class _FacilityDetails extends StatelessWidget {
             icon: Icons.call_outlined,
             text: facility.phone!,
           ),
-        if (facility.openingHours != null &&
-            facility.openingHours!.isNotEmpty)
+        if (facility.openingHours != null && facility.openingHours!.isNotEmpty)
           _DetailLine(
             icon: Icons.schedule_outlined,
             text: facility.openingHours!,
@@ -1711,8 +1803,7 @@ class _FacilityDetails extends StatelessWidget {
             icon: Icons.language_outlined,
             text: l10n.t('facility_website'),
             trailing: TextButton(
-              onPressed: () =>
-                  openExternalUrl(context, facility.website),
+              onPressed: () => openExternalUrl(context, facility.website),
               child: Text(l10n.t('view_details')),
             ),
           ),
@@ -1724,9 +1815,7 @@ class _FacilityDetails extends StatelessWidget {
                 onPressed: facility.phone == null ? null : onCall,
                 icon: const Icon(Icons.call_outlined, size: 18),
                 label: Text(
-                  facility.phone == null
-                      ? l10n.t('no_phone')
-                      : l10n.t('call'),
+                  facility.phone == null ? l10n.t('no_phone') : l10n.t('call'),
                 ),
               ),
             ),
@@ -1804,10 +1893,8 @@ class _SourceNote extends StatelessWidget {
             source.toLowerCase().contains('openstreetmap')
                 ? l10n.t('facility_source')
                 : source,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(fontSize: 10.5),
+            style:
+                Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10.5),
           ),
         ),
       ],
